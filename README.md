@@ -15,7 +15,7 @@ The Interface layer in SIM is configured for 8 drives at 8MB each.
 
 Formatting the drive is simple... just fill the drive with hex "E5" and DOS/65 will figure out the rest.
 WDC Tools are required to build all required software components!
- - TIDE is used to build C02BIOS and C02Monitor
+ - TIDE is used to build C02BIOS and C02Monitor (see RTC/CF Card Adapter for BIOS and Monitor code)
  - TIDE is used to build DOS/65 utilities (XMODEM, SUB, UCOPY, SD, etc.)
  - A Batch file is used to build the DOS/65 ROM image
 
