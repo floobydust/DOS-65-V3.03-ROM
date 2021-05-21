@@ -1,0 +1,598 @@
+  Sun Mar 14 2021 21:21                                                                                                    Page 1
+
+
+                                               ***************************************
+                                               **      WDC 65C02 Macro Assembler    **
+                                               **                                   **
+                                               **     Version 3.49.1- Feb  6 2006    **
+                                               ***************************************
+
+     1                        	globals	on
+     2                        	case	off
+     3                        	chip	65c02
+     4                        	pw	132
+     5                        	pl	44
+     6                        ;ucopy
+     7                        ;Version 3.02-S
+     8                        ;released:	9 February 2015 (3.00-2)
+     9                        ;last revision:
+    10                        ;		2 March 2015 (3.01)
+    11                        ;			changed exit to through PEM
+    12                        ;		13 August 2017 (3.02)
+    13                        ;			changed name
+    14                        ;			cleaned up messages
+    15                        ;Program to copy files from one location to another including user area.
+    16                        ;Syntax is
+    17                        ;	UCOPY FROMUFN TOUFN
+    18                        ;Where the TOUFN may simply be a drive
+    19                        ;specification in which case the destination
+    20                        ;will have the same name as the source.
+    21                        ;Key differences between this and prior COPY versions is
+    22                        ;use of the from to syntax and incorporation of code
+    23                        ;to ensure CCM is preserved so a RTS can be done
+    24                        ;at the end rather than a warm boot. V3.00
+    25                        ;adds the ability to copy a file from one user
+    26                        ;area to another. UCopy will ask for the
+    27                        ;from and to user areas.
+    28                        ;
+    29                        ;fixed parameters
+    30             00000030   pzstrt	equ	$30		;start of free page zero RAM
+    31             0000000D   cr	equ	$0D		;return
+    32             0000000A   lf	equ	$0A		;linefeed
+    33             00000107   DFLFCB	equ	$107		;default fcb
+    34             00000103   PEM	equ	$103		;pem entry
+    35             00000100   BOOT	equ	$100		;warm boot
+  Sun Mar 14 2021 21:21                                                                                                    Page 2
+
+
+    36             00000800   TEA	equ	$800		;execution org
+    37             00000900   ccmlng	equ	2304		;CCM length
+    38                        ;page zero variables
+    39                        
+    40                                page0
+    41                        
+    42                        	org	pzstrt
+    43                        NAMED			;"to" file named if <128
+    44 00:0030:              	defs	1
+    45                        TOIND		      	;"to" file index
+    46 00:0031:              	defs	2
+    47                        FRMIND		      	;"from" file index
+    48 00:0033:              	defs	2
+    49                        EOFFLG		      	;eof flag if >127
+    50 00:0035:              	defs	1
+    51                        BUFLNG		      	;buffer length
+    52 00:0036:              	defs	2
+    53                        FromUn		      	;from user code
+    54 00:0038:              	defs	1
+    55                        ToUn		      	;to user code
+    56 00:0039:              	defs	1
+    57                        DflUn		      	;default user code
+    58 00:003A:              	defs	1
+    59                        user		      	;user number work area
+    60 00:003B:              	defs	1
+    61                        savex		      	;save x
+    62 00:003C:              	defs	1
+    63                        savey		      	;save y
+    64 00:003D:              	defs	1
+    65                        
+    66 00:003E:                      ends
+    67                        
+    68                                code
+    69                        
+    70                        	;main program
+    71                        	org	TEA
+    72                        ;send opening banner
+    73 00:0800: A9 08        	lda	#<opnmsg
+    74 00:0802: A0 0B        	ldy	#>opnmsg
+    75 00:0804: 20 B9 09     	jsr	msgout
+    76                        ;capture default user code
+  Sun Mar 14 2021 21:21                                                                                                    Page 3
+
+
+    77 00:0807: 20 CD 09     	jsr	getusr		;make PEM call
+    78 00:080A: 85 3A        	sta	DflUn		;and save
+    79                        ;now start processing
+    80 00:080C: 38           	SEC			;calculate
+    81 00:080D: AD 04 01     	LDA	PEM+1		;amount
+    82 00:0810: E9 41        	SBC	#<BUFFER	;of free memory
+    83 00:0812: 29 80        	AND	#$80		;in mod 128
+    84 00:0814: 85 36        	STA	BUFLNG		;and
+    85 00:0816: AD 05 01     	LDA	PEM+2		;save
+    86 00:0819: E9 0C        	SBC	#>BUFFER	;for
+    87 00:081B: 85 37        	STA	BUFLNG+1	;read/write
+    88 00:081D: 38           	sec			;now back up before SIM
+    89 00:081E: A5 36        	lda	buflng
+    90 00:0820: E9 00        	sbc	#ccmlng*256/256
+    91 00:0822: 85 36        	sta	buflng
+    92 00:0824: A5 37        	lda	buflng+1
+    93 00:0826: E9 09        	sbc	#ccmlng/256
+    94 00:0828: 85 37        	sta	buflng+1
+    95 00:082A: 18           	CLC			;now
+    96 00:082B: A5 36        	LDA	BUFLNG		;add
+    97 00:082D: 69 41        	ADC	#<BUFFER	;start
+    98 00:082F: 85 36        	STA	BUFLNG		;back
+    99 00:0831: A5 37        	LDA	BUFLNG+1	;to
+   100 00:0833: 69 0C        	ADC	#>BUFFER	;get
+   101 00:0835: 85 37        	STA	BUFLNG+1	;max index
+   102                        ;check for ambiguous names
+   103 00:0837: A9 3F        	LDA	#'?'		;get a ?
+   104 00:0839: A2 0B        	LDX	#11		;set index
+   105 00:083B: DD 07 01     TSTAMB	CMP	DFLFCB,X	;test to
+   106 00:083E: D0 03        	BNE	OK000		;ok if not
+   107 00:0840: 4C AA 09     	JMP	BADFIL		;else error
+   108 00:0843: DD 17 01     OK000	CMP	DFLFCB+16,X	;now try from
+   109 00:0846: D0 03        	BNE	OK001		;also ok if not
+   110 00:0848: 4C AA 09     	JMP	BADFIL		;else error
+   111 00:084B: CA           OK001	DEX			;drop index
+   112 00:084C: D0 ED        	BNE	TSTAMB		;loop if more
+   113                        ;now make sure source is named
+   114 00:084E: A9 20        	LDA	#' '		;get a space
+   115 00:0850: CD 08 01     	CMP	DFLFCB+1	;try name
+   116 00:0853: D0 08        	BNE	NOTZIP		;ok if different
+   117 00:0855: CD 10 01     	CMP	DFLFCB+9	;now try type
+  Sun Mar 14 2021 21:21                                                                                                    Page 4
+
+
+   118 00:0858: D0 03        	BNE	NOTZIP		;also ok if diff
+   119 00:085A: 4C AA 09     	JMP	BADFIL		;else error
+   120                        ;now see if destination not named
+   121 00:085D: 86 30        NOTZIP	STX	NAMED		;say named for now
+   122 00:085F: CD 18 01     	CMP	DFLFCB+17	;try name
+   123 00:0862: D0 07        	BNE	ISNAMD		;ok if diff
+   124 00:0864: CD 20 01     	CMP	DFLFCB+25	;now try type
+   125 00:0867: D0 02        	BNE	ISNAMD		;also ok if diff
+   126 00:0869: C6 30        	DEC	NAMED		;else make neg
+   127                        ;determine user areas for FROM and TO files
+   128 00:086B: A9 2D        isnamd	lda	#<frmums	;point to from user area message
+   129 00:086D: A0 0B        	ldy	#>frmums
+   130 00:086F: 20 B9 09     	jsr	msgout		;send message
+   131 00:0872: 20 44 0A     	jsr	gssun		;get response for FROM
+   132 00:0875: 20 D8 0A     	jsr	bcdbyt		;make a single byte
+   133 00:0878: C9 10        	cmp	#16		;see if too big
+   134 00:087A: 90 0A        	bcc	frmuok		;no so go to next
+   135 00:087C: A9 8E        	lda	#<iermsg	;bad so say so
+   136 00:087E: A0 0B        	ldy	#>iermsg
+   137 00:0880: 20 B9 09     	jsr	msgout
+   138 00:0883: 4C 6B 08     	jmp	isnamd		;and loop
+   139 00:0886: 85 38        frmuok	sta	fromun		;and save
+   140 00:0888: A9 5B        toredo	lda	#<toums		;now do same for TO
+   141 00:088A: A0 0B        	ldy	#>toums
+   142 00:088C: 20 B9 09     	jsr	msgout		;using same code
+   143 00:088F: 20 44 0A     	jsr	gssun
+   144 00:0892: 20 D8 0A     	jsr	bcdbyt		;make a single byte
+   145 00:0895: C9 10        	cmp	#16		;see if too big
+   146 00:0897: 90 0A        	bcc	touok		;no so go to next
+   147 00:0899: A9 8E        	lda	#<iermsg	;bad so say so
+   148 00:089B: A0 0B        	ldy	#>iermsg
+   149 00:089D: 20 B9 09     	jsr	msgout
+   150 00:08A0: 4C 88 08     	jmp	toredo		;and loop
+   151 00:08A3: 85 39        touok	sta	toun		;save TO user code
+   152                        ;set up fcbs
+   153 00:08A5: A2 0B        	LDX	#11		;set index
+   154 00:08A7: BD 07 01     MOVNME	LDA	DFLFCB,X	;get from
+   155 00:08AA: 9D DE 0B     	STA	FRMFCB,X	;and set
+   156 00:08AD: 24 30        	BIT	NAMED		;test flag
+   157 00:08AF: 30 03        	BMI	NMESME		;branch if no name
+   158 00:08B1: BD 17 01     	LDA	DFLFCB+16,X	;else get to
+  Sun Mar 14 2021 21:21                                                                                                    Page 5
+
+
+   159 00:08B4: 9D FF 0B     NMESME	STA	TOFCB,X		;save "to" name
+   160 00:08B7: 9D 20 0C     	STA	ENDFCB,X	;and in end
+   161 00:08BA: CA           	DEX			;drop count
+   162 00:08BB: D0 EA        	BNE	MOVNME		;loop if more
+   163                        ;make sure drives are right
+   164 00:08BD: AD 17 01     	LDA	DFLFCB+16	;get to
+   165 00:08C0: 8D FF 0B     	STA	TOFCB		;and set
+   166 00:08C3: 8D 20 0C     	STA	ENDFCB		;both to and end
+   167 00:08C6: AD 07 01     	LDA	DFLFCB		;and same
+   168 00:08C9: 8D DE 0B     	STA	FRMFCB		;for from
+   169                        ;clear rest of fcbs
+   170 00:08CC: 8A           	TXA			;clear a
+   171 00:08CD: A2 20        	LDX	#32		;set index
+   172 00:08CF: 9D FF 0B     CLRFCB	STA	TOFCB,X		;clear
+   173 00:08D2: 9D 20 0C     	STA	ENDFCB,X	;all
+   174 00:08D5: 9D DE 0B     	STA	FRMFCB,X	;fcbs
+   175 00:08D8: CA           	DEX			;drop count
+   176 00:08D9: E0 0B        	CPX	#11		;see if at name
+   177 00:08DB: D0 F2        	BNE	CLRFCB		;loop if more
+   178                        ;make "to" a temp
+   179 00:08DD: A2 03        	LDX	#3		;set index
+   180 00:08DF: A9 24        	LDA	#'$'		;get byte
+   181 00:08E1: 9D 07 0C     TMPLPE	STA	TOFCB+8,X	;insert
+   182 00:08E4: CA           	DEX			;drop count
+   183 00:08E5: D0 FA        	BNE	TMPLPE		;loop if more
+   184                        ;try to open source
+   185 00:08E7: 20 C3 09     	jsr	SetFmU		;set "FROM" user code
+   186 00:08EA: 20 A0 09     	JSR	SFMFCB		;point to FCB
+   187 00:08ED: 20 73 09     	JSR	OPNFIL		;open it
+   188 00:08F0: 10 03        	BPL	OK002		;ok
+   189 00:08F2: 4C AA 09     	JMP	BADFIL		;else error
+   190                        ;set up destination
+   191 00:08F5: 20 C8 09     OK002	jsr	SetToU		;set "TO" user code
+   192 00:08F8: 20 9B 09     	JSR	STOFCB		;point to "to"
+   193 00:08FB: 20 7D 09     	JSR	DLTFIL		;delete it
+   194 00:08FE: 20 9B 09     	JSR	STOFCB		;point again
+   195 00:0901: 20 8C 09     	JSR	CRTFIL		;make it
+   196 00:0904: 10 03        	BPL	OK003		;ok
+   197 00:0906: 4C AA 09     	JMP	BADFIL		;else error
+   198 00:0909: 20 9B 09     OK003	JSR	STOFCB		;one more time
+   199 00:090C: 20 73 09     	JSR	OPNFIL		;and open
+  Sun Mar 14 2021 21:21                                                                                                    Page 6
+
+
+   200 00:090F: 10 03        	BPL	OK004		;ok
+   201 00:0911: 4C AA 09     	JMP	BADFIL		;else error
+   202                        ;do the move
+   203                        OK004
+   204 00:0914: A9 00        	LDA	#0		;clear eof
+   205 00:0916: 85 35        	STA	EOFFLG		;flag
+   206 00:0918: A9 A9        	lda	#<cpymsg	;announce when copy in process
+   207 00:091A: A0 0B        	ldy	#>cpymsg
+   208 00:091C: 20 B9 09     	jsr	msgout
+   209 00:091F: 20 D4 09     DOMOVE	JSR	RDEBUF		;read buffer
+   210 00:0922: 20 0C 0A     	JSR	WRTBUF		;now write it
+   211 00:0925: 24 35        	BIT	EOFFLG		;test flag
+   212 00:0927: 10 F6        	BPL	DOMOVE		;loop if not
+   213 00:0929: 20 C8 09     	jsr	SetToU		;set "TO" user code
+   214 00:092C: 20 9B 09     	JSR	STOFCB		;point to "to"
+   215 00:092F: 20 78 09     	JSR	CLSFIL		;close it
+   216 00:0932: 10 03        	BPL	OK005		;ok
+   217 00:0934: 4C AA 09     	JMP	BADFIL		;else error
+   218                        ;delete old "end" and rename "to"
+   219 00:0937: 20 A5 09     OK005	JSR	SENFCB		;point to it
+   220 00:093A: 20 7D 09     	JSR	DLTFIL		;delete it
+   221 00:093D: A2 0B        	LDX	#11		;now move
+   222 00:093F: BD 20 0C     RNMLPE	LDA	ENDFCB,X	;"end"
+   223 00:0942: 9D 0F 0C     	STA	TOFCB+16,X	;to
+   224 00:0945: CA           	DEX			;"to"
+   225 00:0946: D0 F7        	BNE	RNMLPE		;fcb
+   226 00:0948: 20 9B 09     	JSR	STOFCB		;point to it
+   227 00:094B: 20 91 09     	JSR	RNMFIL		;and rename
+   228 00:094E: 20 BE 09     	jsr	SetDfU		;set default user
+   229 00:0951: A2 00        	ldx	#0		;have PEM do warm boot
+   230 00:0953: 4C 03 01     	jmp	pem		;done
+   231                        ;subroutines
+   232                        ;output with save
+   233 00:0956: 48           charot	pha			;save char
+   234 00:0957: 86 3C        	stx	savex		;save x
+   235 00:0959: 84 3D        	sty	savey		;and y
+   236 00:095B: 20 64 09     	jsr	outchr		;send
+   237 00:095E: A4 3D        	ldy	savey		;restore
+   238 00:0960: A6 3C        	ldx	savex		;x and y
+   239 00:0962: 68           	pla			;then char
+   240 00:0963: 60           	rts
+  Sun Mar 14 2021 21:21                                                                                                    Page 7
+
+
+   241                        ;output character in A to console
+   242 00:0964: A2 02        outchr	ldx	#2		;character output
+   243 00:0966: 4C 03 01     	jmp	PEM
+   244                        ;Initialize system
+   245 00:0969: A2 0D        INTSYS	ldx	#13
+   246 00:096B: 4C 03 01     	jmp	PEM
+   247                        ;select drive
+   248 00:096E: A2 0E        SELDRV	ldx	#14
+   249 00:0970: 4C 03 01     	jmp	PEM
+   250                        ;open file
+   251 00:0973: A2 0F        OPNFIL	LDX	#15
+   252 00:0975: 4C 03 01     	JMP	PEM
+   253                        ;close file
+   254 00:0978: A2 10        CLSFIL	LDX	#16
+   255 00:097A: 4C 03 01     	JMP	PEM
+   256                        ;delete file
+   257 00:097D: A2 13        DLTFIL	LDX	#19
+   258 00:097F: 4C 03 01     	JMP	PEM
+   259                        ;read record
+   260 00:0982: A2 14        RDERCR	LDX	#20
+   261 00:0984: 4C 03 01     	JMP	PEM
+   262                        ;write record
+   263 00:0987: A2 15        WRTRCR	LDX	#21
+   264 00:0989: 4C 03 01     	JMP	PEM
+   265                        ;create file
+   266 00:098C: A2 16        CRTFIL	LDX	#22
+   267 00:098E: 4C 03 01     	JMP	PEM
+   268                        ;rename file
+   269 00:0991: A2 17        RNMFIL	LDX	#23
+   270 00:0993: 4C 03 01     	JMP	PEM
+   271                        ;set buffer
+   272 00:0996: A2 1A        SETBUF	LDX	#26
+   273 00:0998: 4C 03 01     	JMP	PEM
+   274                        ;set dest fcb
+   275 00:099B: A9 FF        STOFCB	LDA	#<TOFCB
+   276 00:099D: A0 0B        	LDY	#>TOFCB
+   277 00:099F: 60           	RTS
+   278                        ;set source fcb
+   279 00:09A0: A9 DE        SFMFCB	LDA	#<FRMFCB
+   280 00:09A2: A0 0B        	LDY	#>FRMFCB
+   281 00:09A4: 60           	RTS
+  Sun Mar 14 2021 21:21                                                                                                    Page 8
+
+
+   282                        ;set end fcb
+   283 00:09A5: A9 20        SENFCB	LDA	#<ENDFCB
+   284 00:09A7: A0 0C        	LDY	#>ENDFCB
+   285 00:09A9: 60           	RTS
+   286                        ;disk error exit
+   287 00:09AA: A9 E5        BADFIL	LDA	#<ERRMSG
+   288 00:09AC: A0 0A        	LDY	#>ERRMSG
+   289 00:09AE: 20 B9 09     	jsr	msgout
+   290 00:09B1: 20 BE 09     	jsr	SetDfU		;set default user code
+   291 00:09B4: A2 00        	ldx	#0		;do warm boot
+   292 00:09B6: 4C 03 01     	JMP	PEM
+   293                        ;send message to console
+   294 00:09B9: A2 09        msgout	LDX	#9
+   295 00:09BB: 4C 03 01     	jmp	PEM
+   296                        ;set user code to DEFAULT
+   297 00:09BE: A5 3A        SetDfU	lda	DflUn
+   298 00:09C0: 4C CF 09     	jmp	SetUsr
+   299                        ;set user code to "FROM"
+   300 00:09C3: A5 38        SetFmU	lda	FromUn
+   301 00:09C5: 4C CF 09     	jmp	SetUsr
+   302                        ;set user code to "TO"
+   303 00:09C8: A5 39        SetToU	lda	ToUn
+   304 00:09CA: 4C CF 09     	jmp	SetUsr
+   305                        ;get user code
+   306 00:09CD: A9 FF        GetUsr	lda	#255
+   307                        ;set user code
+   308 00:09CF: A2 24        SetUsr	ldx	#36
+   309 00:09D1: 4C 03 01     	jmp	PEM
+   310                        ;read buffer
+   311                        ;if eof then set flag
+   312 00:09D4: 20 C3 09     RDEBUF	jsr	SetFmU		;set user to "FROM"
+   313 00:09D7: A9 41        	LDA	#<BUFFER	;set
+   314 00:09D9: A0 0C        	LDY	#>BUFFER	;index
+   315 00:09DB: 85 33        	STA	FRMIND		;to buffer
+   316 00:09DD: 84 34        	STY	FRMIND+1	;start
+   317 00:09DF: A5 33        RDELPE	LDA	FRMIND		;get index
+   318 00:09E1: A4 34        	LDY	FRMIND+1	;and
+   319 00:09E3: 20 96 09     	JSR	SETBUF		;set buffer
+   320 00:09E6: 20 A0 09     	JSR	SFMFCB		;point to fcb
+   321 00:09E9: 20 82 09     	JSR	RDERCR		;read a record
+   322 00:09EC: F0 08        	BEQ	RDEOK		;ok if zero
+  Sun Mar 14 2021 21:21                                                                                                    Page 9
+
+
+   323 00:09EE: 10 03        	BPL	OK006		;eof if positive
+   324 00:09F0: 4C AA 09     	JMP	BADFIL		;else error
+   325 00:09F3: C6 35        OK006	DEC	EOFFLG		;set flag
+   326 00:09F5: 60           	RTS			;and quit
+   327 00:09F6: 18           RDEOK	CLC			;now
+   328 00:09F7: A5 33        	LDA	FRMIND		;add
+   329 00:09F9: 69 80        	ADC	#128		;128
+   330 00:09FB: 85 33        	STA	FRMIND		;to
+   331 00:09FD: 90 02        	BCC	NOFRMC		;index
+   332 00:09FF: E6 34        	INC	FRMIND+1	;for next
+   333 00:0A01: C5 36        NOFRMC	CMP	BUFLNG		;compare to low
+   334 00:0A03: D0 DA        	BNE	RDELPE		;loop if ok
+   335 00:0A05: A5 34        	LDA	FRMIND+1	;get high
+   336 00:0A07: C5 37        	CMP	BUFLNG+1	;compare it
+   337 00:0A09: D0 D4        	BNE	RDELPE		;also loop if more
+   338 00:0A0B: 60           	RTS
+   339                        ;write buffer
+   340 00:0A0C: 20 C8 09     WRTBUF	jsr	SetToU		;set user to "TO"
+   341 00:0A0F: A9 41        	LDA	#<BUFFER	;set
+   342 00:0A11: A0 0C        	LDY	#>BUFFER	;index
+   343 00:0A13: 85 31        	STA	TOIND		;to
+   344 00:0A15: 84 32        	STY	TOIND+1		;start
+   345 00:0A17: A5 31        WRTLPE	LDA	TOIND		;get current
+   346 00:0A19: A4 32        	LDY	TOIND+1		;index
+   347 00:0A1B: 20 96 09     	JSR	SETBUF		;and set
+   348 00:0A1E: A5 31        	LDA	TOIND		;compare index
+   349 00:0A20: C5 33        	CMP	FRMIND		;to read
+   350 00:0A22: D0 07        	BNE	DOWRT		;ok if diff
+   351 00:0A24: A5 32        	LDA	TOIND+1		;do same
+   352 00:0A26: C5 34        	CMP	FRMIND+1	;for high
+   353 00:0A28: D0 01        	BNE	DOWRT		;index
+   354 00:0A2A: 60           	RTS			;else done
+   355 00:0A2B: 20 9B 09     DOWRT	JSR	STOFCB		;point to fcb
+   356 00:0A2E: 20 87 09     	JSR	WRTRCR		;write record
+   357 00:0A31: F0 03        	BEQ	OK007		;ok
+   358 00:0A33: 4C AA 09     	JMP	BADFIL		;else error
+   359 00:0A36: 18           OK007	CLC			;now
+   360 00:0A37: A5 31        	LDA	TOIND		;add
+   361 00:0A39: 69 80        	ADC	#128		;128
+   362 00:0A3B: 85 31        	STA	TOIND		;to index
+   363 00:0A3D: 90 D8        	BCC	WRTLPE		;with
+  Sun Mar 14 2021 21:21                                                                                                    Page 10
+
+
+   364 00:0A3F: E6 32        	INC	TOIND+1		;carry
+   365 00:0A41: 4C 17 0A     	jmp	WRTLPE		;and loop always
+   366                        ;get and save user number
+   367                        gssun
+   368 00:0A44: 20 83 0A     gssagn	jsr	rinclw		;get input
+   369 00:0A47: 20 CC 0A     	jsr	chkdec		;see if first is decimal
+   370 00:0A4A: 90 24        	bcc	gsserr		;error if not
+   371 00:0A4C: C9 30        	cmp	#'0'		;if at least 0 is ok
+   372 00:0A4E: 90 20        	bcc	gsserr		;else error
+   373 00:0A50: 29 0F        	and	#%00001111	;get low nibble
+   374 00:0A52: AA           	tax			;save in x
+   375 00:0A53: 85 3C        	sta	user+1		;store in high
+   376 00:0A55: C8           	iny			;next char
+   377 00:0A56: B9 BE 0B     	lda	ctxt,y		;get it
+   378 00:0A59: D0 05        	bne	not1pg		;if not zero more than one
+   379 00:0A5B: 86 3B        	stx	user		;else set low to old high
+   380 00:0A5D: 85 3C        	sta	user+1		;and clear high
+   381 00:0A5F: 60           	rts
+   382 00:0A60: 20 CC 0A     not1pg	jsr	chkdec		;see if decimal
+   383 00:0A63: 90 0B        	bcc	gsserr		;error if not
+   384 00:0A65: 29 0F        	and	#%00001111	;get nibble
+   385 00:0A67: 85 3B        	sta	user		;put in low
+   386 00:0A69: C8           	iny			;next char
+   387 00:0A6A: B9 BE 0B     	lda	ctxt,y		;get it
+   388 00:0A6D: D0 01        	bne	gsserr		;error if not end
+   389 00:0A6F: 60           	rts
+   390 00:0A70: A9 8E        gsserr	lda	#<iermsg	;send illegal input message
+   391 00:0A72: A0 0B        	ldy	#>iermsg
+   392 00:0A74: 20 B9 09     	jsr	msgout
+   393 00:0A77: 4C 44 0A     	jmp	gssagn		;and loop
+   394                        ;do buffered console input
+   395 00:0A7A: A9 BC        rdeinp	lda	#<cbuf		;read buffer
+   396 00:0A7C: A0 0B        	ldy	#>cbuf
+   397 00:0A7E: A2 0A        	ldx	#10
+   398 00:0A80: 4C 03 01     	jmp	pem
+   399                        ;read input and convert lower case to upper
+   400                        ; error if no input or if input is all blanks.
+   401                        ; at exit y is index into ctxt
+   402                        ;         a is character at ctxt,y
+   403 00:0A83: A9 BC        rinclw	lda	#<cbuf		;point to
+   404 00:0A85: A0 0B        	ldy	#>cbuf		;buffer
+  Sun Mar 14 2021 21:21                                                                                                    Page 11
+
+
+   405 00:0A87: 20 7A 0A     	jsr	rdeinp		;read input
+   406 00:0A8A: A9 0A        	lda	#lf		;send
+   407 00:0A8C: 20 56 09     	jsr	charot		;a lf
+   408 00:0A8F: A0 00        	ldy	#0		;clear index
+   409 00:0A91: AE BD 0B     	ldx	clng		;get length
+   410 00:0A94: F0 1F        	beq	rdiner		;error if zero
+   411 00:0A96: B9 BE 0B     lwrcnv	lda	ctxt,y		;get char
+   412 00:0A99: C9 61        	cmp	#'a'		;if less than a
+   413 00:0A9B: 90 09        	bcc	dochg		;is ok
+   414 00:0A9D: C9 7B        	cmp	#'z'+1		;if over z
+   415 00:0A9F: B0 05        	bcs	dochg		;is ok
+   416 00:0AA1: 29 5F        	and	#%01011111	;else convert
+   417 00:0AA3: 99 BE 0B     	sta	ctxt,y		;and save
+   418 00:0AA6: C8           dochg	iny			;bump index
+   419 00:0AA7: CA           	dex			;drop count
+   420 00:0AA8: D0 EC        	bne	lwrcnv		;loop if more
+   421 00:0AAA: 8A           	txa			;clear a
+   422 00:0AAB: 99 BE 0B     	sta	ctxt,y		;insert zero
+   423 00:0AAE: A8           	tay			;clear index
+   424 00:0AAF: 20 BF 0A     	jsr	spcskp		;find first non-blank
+   425 00:0AB2: F0 01        	beq	rdiner		;error if none
+   426 00:0AB4: 60           	rts			;else ok
+   427 00:0AB5: A9 8E        rdiner	lda	#<iermsg	;point to
+   428 00:0AB7: A0 0B        	ldy	#>iermsg	;input error message
+   429 00:0AB9: 20 B9 09     	jsr	msgout		;print it
+   430 00:0ABC: 4C 83 0A     	jmp	rinclw		;try all over
+   431                        ;skip blanks
+   432 00:0ABF: B9 BE 0B     spcskp	lda	ctxt,y		;get char
+   433 00:0AC2: F0 07        	beq	spcext		;done if none
+   434 00:0AC4: C9 20        	cmp	#' '		;if not space
+   435 00:0AC6: D0 03        	bne	spcext		;then done
+   436 00:0AC8: C8           	iny			;else loop
+   437 00:0AC9: D0 F4        	bne	spcskp		;and try again
+   438 00:0ACB: 60           spcext	rts
+   439                        ;check for decimal
+   440                        ; if decimal then c=1 else c=0
+   441 00:0ACC: C9 30        chkdec	cmp	#'0'		;if less than "0"
+   442 00:0ACE: 90 04        	bcc	notdec		;not number
+   443 00:0AD0: C9 3A        	cmp	#'9'+1		;if less than "9"+1
+   444 00:0AD2: 90 02        	bcc	isdec		;is a number
+   445 00:0AD4: 18           notdec	clc			;not a number
+  Sun Mar 14 2021 21:21                                                                                                    Page 12
+
+
+   446 00:0AD5: 60           	rts
+   447 00:0AD6: 38           isdec	sec			;a number
+   448 00:0AD7: 60           	rts
+   449                        ;pack BCD user into byte
+   450                        ;INPUT: user has low decimal digit, user+1
+   451                        ;holds high digit.
+   452                        ;OUTPUT: binary equivalent in A of user+(user1*10)
+   453 00:0AD8: 18           bcdbyt	clc			;clear carry
+   454 00:0AD9: A9 00        	lda	#0		;and accum
+   455 00:0ADB: A2 0A        	ldx	#10		;then add high
+   456 00:0ADD: 65 3C        bcdlpe	adc	user+1		;to accum
+   457 00:0ADF: CA           	dex			;10
+   458 00:0AE0: D0 FB        	bne	bcdlpe		;times
+   459 00:0AE2: 65 3B        	adc	user		;then add low
+   460 00:0AE4: 60           	rts			;and quit
+   461                        ;messages
+   462 00:0AE5: 0D 0A 45 52  ERRMSG	.BYTE	cr,lf,"ERROR - BAD FILE NAME - ABORTING$"
+       00:0AE9: 52 4F 52 20 
+       00:0AED: 2D 20 42 41 
+       00:0AF1: 44 20 46 49 
+       00:0AF5: 4C 45 20 4E 
+       00:0AF9: 41 4D 45 20 
+       00:0AFD: 2D 20 41 42 
+       00:0B01: 4F 52 54 49 
+       00:0B05: 4E 47 24 
+   463                        ;opening message
+   464 00:0B08: 44 4F 53 2F  opnmsg	.byte	"DOS/65 USER TO USER FILE COPY V3.02S$"
+       00:0B0C: 36 35 20 55 
+       00:0B10: 53 45 52 20 
+       00:0B14: 54 4F 20 55 
+       00:0B18: 53 45 52 20 
+       00:0B1C: 46 49 4C 45 
+       00:0B20: 20 43 4F 50 
+       00:0B24: 59 20 56 33 
+       00:0B28: 2E 30 32 53 
+       00:0B2C: 24 
+   465                        ;FROM user area request
+   466 00:0B2D: 0D 0A        frmums	.byte	cr,lf
+   467 00:0B2F: 45 4E 54 45  	.byte	"ENTER USER AREA FOR SOURCE FILE (0 TO 15)? $"
+       00:0B33: 52 20 55 53 
+       00:0B37: 45 52 20 41 
+  Sun Mar 14 2021 21:21                                                                                                    Page 13
+
+
+       00:0B3B: 52 45 41 20 
+       00:0B3F: 46 4F 52 20 
+       00:0B43: 53 4F 55 52 
+       00:0B47: 43 45 20 46 
+       00:0B4B: 49 4C 45 20 
+       00:0B4F: 28 30 20 54 
+       00:0B53: 4F 20 31 35 
+       00:0B57: 29 3F 20 24 
+   468                        ;TO user area request
+   469 00:0B5B: 0D 0A        toums	.byte	cr,lf
+   470 00:0B5D: 45 4E 54 45  	.byte	"ENTER USER AREA FOR DESTINATION FILE (0 TO 15)? $"
+       00:0B61: 52 20 55 53 
+       00:0B65: 45 52 20 41 
+       00:0B69: 52 45 41 20 
+       00:0B6D: 46 4F 52 20 
+       00:0B71: 44 45 53 54 
+       00:0B75: 49 4E 41 54 
+       00:0B79: 49 4F 4E 20 
+       00:0B7D: 46 49 4C 45 
+       00:0B81: 20 28 30 20 
+       00:0B85: 54 4F 20 31 
+       00:0B89: 35 29 3F 20 
+       00:0B8D: 24 
+   471                        ;illegal input message
+   472 00:0B8E: 0D 0A        iermsg	.byte	cr,lf
+   473 00:0B90: 49 4C 4C 45  	.byte	"ILLEGAL INPUT - REENTER $"
+       00:0B94: 47 41 4C 20 
+       00:0B98: 49 4E 50 55 
+       00:0B9C: 54 20 2D 20 
+       00:0BA0: 52 45 45 4E 
+       00:0BA4: 54 45 52 20 
+       00:0BA8: 24 
+   474                        ;copy in process message
+   475 00:0BA9: 0D 0A        cpymsg	.byte	cr,lf
+   476 00:0BAB: 43 4F 50 59  	.byte	"COPY IN PROCESS $"
+       00:0BAF: 20 49 4E 20 
+       00:0BB3: 50 52 4F 43 
+       00:0BB7: 45 53 53 20 
+       00:0BBB: 24 
+   477                        ;console input buffer - small size in this version
+   478                        cbuf
+  Sun Mar 14 2021 21:21                                                                                                    Page 14
+
+
+   479 00:0BBC: 20           cmax	.byte	32		;input
+   480 00:0BBD: 00           clng	.byte	0		;buffer
+   481                        ctxt
+   482 00:0BBE:              	defs	32
+   483                        ;source fcb
+   484                        FRMFCB
+   485 00:0BDE:              	defs	33
+   486                        ;destination fcb
+   487                        TOFCB
+   488 00:0BFF:              	defs	33
+   489                        ;end fcb
+   490                        ENDFCB
+   491 00:0C20:              	defs	33
+   492                        ;buffer
+   493                        BUFFER
+   494                        
+   495                                ends
+   496                        
+   497                        	END
+
+
+      Lines assembled: 497
+      Errors: 0

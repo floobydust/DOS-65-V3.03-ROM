@@ -1,0 +1,6 @@
+dir a:
+dir b:*.asm
+dir b:*.lst
+sd b:*.asm
+sd b:*.lst
+type b:sub300.asm

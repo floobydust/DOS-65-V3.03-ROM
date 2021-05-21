@@ -1,0 +1,1813 @@
+  Mon Mar 15 2021  1:14                                                                                                    Page 1
+
+
+                                               ***************************************
+                                               **      WDC 65C02 Macro Assembler    **
+                                               **                                   **
+                                               **     Version 3.49.1- Feb  6 2006    **
+                                               ***************************************
+
+     1                        	pw	132
+     2                        	pl	66
+     3                        	case	off
+     4                        	chip	W65C02S
+     5                        ;XSBC123
+     6                        ;When code is configured it is recommended that
+     7                        ;a copy of the executable be named XMODEM.COM
+     8                        ;for consistency with example and help.
+     9                        ;Special version of xmodem for direct communication
+    10                        ;with computer at 19200 bps using SBC2 ACIA interface
+    11                        ;Since this is same rate
+    12                        ;that SBC2 MONITOR V5.2L or later uses there is no need to
+    13                        ;initialize the hardware.
+    14                        ;Version 1.00 By David Robinson CIS 71505,1172
+    15                        ;Based on MODEM.ASM by Ward Christensen
+    16                        ;
+    17                        ;last revision:	8 January 1984 by R. Leary (1.01)
+    18                        ;			eliminated msize and pages dependence
+    19                        ;			added const result check and #$ff
+    20                        ;			corrected several errors
+    21                        ;			made easily adaptable
+    22                        ;		13 March 1984 by R. Leary (1.02)
+    23                        ;			added relative user set
+    24                        ;		24 November 1984 by R. Leary (1.03)
+    25                        ;			changed io page
+    26                        ;			clear page zero data area
+    27                        ;		24 May 1986 by R. Leary (1.04)
+    28                        ;			corrected problems in original
+    29                        ;		25 December 1988 by R. Leary (1.05)
+    30                        ;			converted to user 3
+    31                        ;			corrected error near csabor
+    32                        ;			added printer spooling
+    33                        ;		9 March 2008 by R. Leary (1.06)
+    34                        ;			corrected spelling
+    35                        ;			reformatted for TASM & ASM210 & up
+    36                        ;		24 April 2014 by R. Leary (1.07)
+    37                        ;			changed to User 1
+    38                        ;			deleted old printer port info
+    39                        ;			set print to do nothing
+    40                        ;			corrected many spelling errors
+    41                        ;		27 April 2014 by R. Leary (1.08)
+    42                        ;			added lower to upper case routine
+    43                        ;			added call to SIM for printer output
+    44                        ;			made keyboard interaction consistent
+    45                        ;				RETURN (ENTER) --> continue
+    46                        ;				CTRL-C --> abort transfer
+    47                        ;				CTRL-E --> quit a boot
+    48                        ;				R --> retry
+    49                        ;				Y --> yes
+    50                        ;		3 November 2014 by R. Leary (1.10)
+    51                        ;			converted IO to SERIAL IO Port A
+    52                        ;			converted to WDC syntax
+    53                        ;			did some 65C02 opcode conversion
+    54                        ;		6 December 2014 by R.Leary (1.20)
+    55                        ;			corrected one second timing for 2.5 MHz CPU clock
+    56                        ;			started effort to improve speed
+    57                        ;			incorporated V1.11 changes
+  Mon Mar 15 2021  1:14                                                                                                    Page 2
+
+
+    58                        ;		5 March 2016 (1.21) Rich Leary
+    59                        ;			restored check for nulls in RCVSQ
+    60                        ;			corrected timing loop near nochar
+    61                        ;			eliminated view and see sub-options
+    62                        ;			changed wait to bufind in places
+    63                        ;		26 June 2017 (1.22)
+    64                        ;			pasted in sxbbind and stdio
+    65                        ;			changed port calls to WDC
+    66                        ;			changed one second timing
+    67                        ;			changed pzstrt to 5
+    68                        ;			enabled "TRANSFER COMPLETE" IN Q MODE
+    69                        ;		28 July 2017 (1.22S)
+    70                        ;			converted to SBC2
+    71                        ;		29 jULY 2017 (1.23s)
+    72                        ;			ELIMINATED GARBAGE getc CALLS
+    73                        ;user defined parameters - mostly port definitions
+    74                        ;dos/65 parameters
+    75             00000030   pzstrt	equ	$30		;first usable page zero location
+    76             00000100   boot	equ	$100		;warm boot jmp
+    77             00000103   pem	equ	$103		;pem jmp
+    78             00000107   fcb	equ	$107		;fcb address
+    79             00000117   fcb2	equ	fcb+16		;fcb #2
+    80             00000127   fcbsno	equ	fcb+32		;fcb sector number
+    81             00000113   fcbext	equ	fcb+12		;fcb extent
+    82             00000128   buffer	equ	$128		;Default buffer address
+    83             00000800   tea	equ	$800		;execution org
+    84                        ;
+    85                        ;Page zero equates
+    86                        ;
+    87                        	page0
+    88                        	org	pzstrt
+    89 00:0030:              STROAD	ds	2		;pointer in ilprt
+    90 00:0032:              WAIT	ds	1
+    91 00:0033:              bufind	ds	1		;buffer index
+    92 00:0034:              ERRCNT	ds	1
+    93 00:0035:              SECINB	ds	1
+    94 00:0036:              RCVSNO	ds	1
+    95 00:0037:              EOFLR	ds	1
+    96 00:0038:              CSUM	ds	1
+    97 00:0039:              EOFLG	ds	1
+    98 00:003A:              inner	ds	1		;inner loop timing counter
+    99 00:003B:              outer	ds	1		;outer loop timing counter
+   100 00:003C:              seconds	ds	1		;time out in seconds
+   101 00:003D:              tmpsec	ds	1		;temporary hold for received record number
+   102 00:003E:              from	ds	2		;move from pointer
+   103 00:0040:              to	ds	2		;move to pointer
+   104 00:0042:              tmpchr	ds	1		;temp for received character
+   105 00:0043:              seccnt	ds	1		;sector counter
+   106 00:0044:              sndcnt	ds	1		;byte counter
+   107 00:0045:              tmpcsm	ds	1		;temp checksum
+   108                        lastzp
+   109 00:0046:              	ends
+   110                        ;
+   111                        ;Define some other things (normally not changed)
+   112                        ;
+   113             0000000A   ERRLIM	equ	10		;max # of errors
+   114             00000005   EXITCH	equ	05		;Exit from T or C
+   115             00000004   DISCHR	equ	04		;Disconnects modem
+   116                        ;
+   117                        ;define the ACIA addresses
+   118             00007F70   ACIABase	equ	$7F70
+   119             00007F70   ACIAdat		equ	ACIABase
+   120             00007F71   ACIAsta		equ	ACIABase+1
+  Mon Mar 15 2021  1:14                                                                                                    Page 3
+
+
+   121             00007F72   ACIAcmd		equ	ACIABase+2
+   122             00007F73   ACIActl		equ	ACIABase+3
+   123                        ;
+   124                        ;
+   125                        ;Define PEM equates
+   126             00000009   PRINT	equ	09		;Print till $ in line
+   127             0000000F   OPEN	equ	15		;$FF = Not Found
+   128             00000010   CLOSE	equ	16		; "	"
+   129             00000011   SRCHF	equ	17	 	; "	"  (Search first)
+   130             00000012   SCRHN	equ	18		; "	"  (Search next )
+   131             00000013   ERASE	equ	19		;No return code
+   132             00000014   READ	equ	20		;0 = ok, 1 = EOF
+   133             00000015   WRITE	equ	21		;"	"	$FF=No dir spc
+   134             00000016   MAKE	equ	22		;$FF = Bad
+   135             00000017   REN	equ	23		;"	"
+   136             0000001A   STDMA	equ	26		;Set buffer address
+   137                        ;Define ASCII characters used
+   138             00000001   SOH	equ	01		;Start of header
+   139             00000003   CTRLC	equ	03		;Control-C
+   140             00000004   EOT	equ	04		;End of transmission
+   141             00000005   CTRLE	equ	05		;control-e
+   142             00000006   ACK	equ	06		;Acknowledge
+   143             00000008   BS	equ	08		;backspace
+   144             00000009   TAB	equ	09		;Tab
+   145             0000000A   LF	equ	$0A		;Linefeed
+   146             0000000D   CR	equ	$0D		;Carriage return
+   147             00000015   NAK	equ	$15		;Neg acknowledge
+   148             00000018   CAN	equ	$18		;Cancel
+   149             00000020   space	equ	$20		;blank
+   150                        ;
+   151                        ;Main Program
+   152                        ;
+   153                        		code
+   154                        		org	tea
+   155 00:0800: 4C 5C 08     		jmp	start		;jump to main routine
+   156                        ;direct jumps to sim routines
+   157 00:0803: 4C 06 00     const		jmp	6		;console status
+   158 00:0806: 4C 09 00     conin		jmp	9		;read console input
+   159 00:0809: 4C 0C 00     conot		jmp	12		;write to console
+   160 00:080C: 4C 0F 00     prnot		jmp	15		;write to printer
+   161                        ;set direct sim jump to correct page
+   162 00:080F: AD 02 01     setsim		lda	boot+2		;get upper address
+   163 00:0812: 8D 05 08     		sta	const+2		;then set
+   164 00:0815: 8D 08 08     		sta	conin+2
+   165 00:0818: 8D 0B 08     		sta	conot+2
+   166 00:081B: 8D 0E 08     		sta	prnot+2
+   167                        
+   168 00:081E: AD 01 01                     lda     boot+1          ;get lower address
+   169 00:0821: 18                           clc                     ;clear carry for add
+   170 00:0822: 69 03                        adc     #$03            ;add 3 for next jmp
+   171 00:0824: 8D 04 08                     sta     const+1         ;then set
+   172 00:0827: 69 03                        adc     #$03
+   173 00:0829: 8D 07 08                     sta     conin+1
+   174 00:082C: 69 03                        adc     #$03
+   175 00:082E: 8D 0A 08                     sta     conot+1
+   176 00:0831: 69 03                        adc     #$03
+   177 00:0833: 8D 0D 08                     sta     prnot+1
+   178 00:0836: 60           		rts
+   179                        ;sxbbind.asm
+   180                        ;print character in A to stdout
+   181                        ;keep X and Y, but not necessarily S
+   182 00:0837: 4C 3C FF     PUTC		JMP     $FF3C           ;Call C02 BIOS
+   183                        ;
+  Mon Mar 15 2021  1:14                                                                                                    Page 4
+
+
+   184                        ;check for character ready at input
+   185                        ;returns a=0 and z=0 if none and a=1 and z-0 if ready
+   186                        mon_consts
+   187 00:083A: A5 DF        CHKC		LDA     $DF             ;Check BIOS Input count
+   188 00:083C: F0 02                        BEQ     NO_CHR          ;If zero, exit, no data
+   189 00:083E: A9 11        		LDA     #$011		;say ready
+   190 00:0840: 60           NO_CHR		RTS
+   191                        
+   192                        ;wait until character ready then get character
+   193                        ;WAITC		jsr	CHKC		;see if character
+   194                        ;		beq	WAITC		;loop if none ekse
+   195                        ;get a character from stdin
+   196                        ;call only after CHKC says character is ready
+   197                        ;keep X and Y, but not necessarily S
+   198                        ;C=0 on return is ok, C=1 on return is eof
+   199 00:0841: 20 39 FF     GETC		JSR     $FF39           ;Call C02 BIOS
+   200 00:0844: 18           		CLC
+   201 00:0845: 60           		RTS
+   202                        ;
+   203                        ;same as GETC but clear high bit
+   204                        ;GETC7		JSR     GETC
+   205                        ;		AND     #$7F
+   206                        ;		RTS
+   207                        ;
+   208                        ;	OUTPUT: Output to console device
+   209                        ;
+   210 00:0846: 29 7F        output	and	#$7f		;set the high bit to zero
+   211 00:0848: C9 08        	cmp	#bs		;pass a backspace
+   212 00:084A: F0 0C        	beq	out1
+   213 00:084C: C9 0D        	cmp	#cr		;pass a cr
+   214 00:084E: F0 08        	beq	out1
+   215 00:0850: C9 0A        	cmp	#lf		;pass a lf
+   216 00:0852: F0 04        	beq	out1
+   217 00:0854: C9 20        	cmp	#space		;don't print control codes
+   218 00:0856: 90 03        	bcc	out2
+   219 00:0858: 20 F4 09     out1	jsr	conout		;print the char
+   220 00:085B: 60           out2	rts
+   221                        ;main program execution starts here
+   222 00:085C: 20 0F 08     start	jsr	setsim		;set jump addresses to sim
+   223                        ;clear page zero data area
+   224 00:085F: A2 30        	ldx	#pzstrt		;set index to start
+   225 00:0861: A9 00        	lda	#0		;clear accum
+   226 00:0863: 95 00        clrlpe	sta	$00,x		;clear a byte
+   227 00:0865: E8           	inx			;bump index
+   228 00:0866: E0 46        	cpx	#lastzp		;see if end
+   229 00:0868: D0 F9        	bne	clrlpe		;loop if not
+   230 00:086A: 20 CF 10     	jsr	ilprt		;print opening message
+   231 00:086D: 58 53 42 43  	byte	"XSBC123 (XMODEM) - VERSION 1.23",cr,lf
+       00:0871: 31 32 33 20 
+       00:0875: 28 58 4D 4F 
+       00:0879: 44 45 4D 29 
+       00:087D: 20 2D 20 56 
+       00:0881: 45 52 53 49 
+       00:0885: 4F 4E 20 31 
+       00:0889: 2E 32 33 0D 
+       00:088D: 0A 
+   232 00:088E: 46 4F 52 20  	byte	"FOR UART PORT @ 115,200 BPS"
+       00:0892: 55 41 52 54 
+       00:0896: 20 50 4F 52 
+       00:089A: 54 20 40 20 
+       00:089E: 31 31 35 2C 
+       00:08A2: 32 30 30 20 
+       00:08A6: 42 50 53 
+  Mon Mar 15 2021  1:14                                                                                                    Page 5
+
+
+   233 00:08A9: 0D 0A 0A 00  	byte	cr,lf,lf,0
+   234 00:08AD: AD 08 01     	lda	fcb+1		;get primary option
+   235 00:08B0: C9 48        	cmp	#'H'
+   236 00:08B2: D0 03        	bne	n1
+   237 00:08B4: 4C 0B 12     	jmp	help		;Yes, give help
+   238 00:08B7: C9 58        n1	cmp	#'X'
+   239 00:08B9: D0 03        	bne	n2
+   240 00:08BB: 4C 60 14     	jmp	exam		;Give examples
+   241                        ;
+   242                        ;Save primary option, validate secondary option
+   243                        ;
+   244 00:08BE: 20 44 11     N2	jsr	procop
+   245                        ;
+   246                        ;move the file name from fcb 2 to fcb 1
+   247                        ;
+   248 00:08C1: 20 7C 11     	jsr	movfcb
+   249                        ;
+   250                        ;initialize the serial port
+   251                        ;
+   252 00:08C4: 20 F9 09     	jsr	intmod		;initialize port and modem
+   253                        ;
+   254                        ;Jmp to appropriate function
+   255                        ;
+   256 00:08C7: AD 71 11     	lda 	option		;recover the pri option
+   257 00:08CA: C9 43        	cmp	#'C'		;"COMPUTER" term echo
+   258 00:08CC: D0 03        	bne	op1		;look for more
+   259 00:08CE: 4C 3B 09     	jmp	trmech		;go to term echo
+   260 00:08D1: C9 45        OP1	cmp	#'E'		;terminal in echo
+   261 00:08D3: D0 03        	bne	op2		;branch if not
+   262 00:08D5: 4C 3B 09     	jmp	trmech		;terminal in echo
+   263 00:08D8: C9 54        OP2	cmp	#'T'		;terminal mode?
+   264 00:08DA: D0 03        	bne	op3
+   265 00:08DC: 4C FE 08     	jmp	term		;go to terminal mode
+   266 00:08DF: C9 44        OP3	cmp	#'D'		;disconnect?
+   267 00:08E1: D0 03        	bne	op4		;branch if no
+   268 00:08E3: 4C 61 10     	jmp	discon		;disconnect
+   269 00:08E6: C9 53        OP4	cmp	#'S'		;send a file?
+   270 00:08E8: D0 03        	bne	op5		;no ->
+   271 00:08EA: 4C 66 09     	jmp	senfil		;go send file
+   272 00:08ED: C9 52        OP5	cmp	#'R'		;receive a file?
+   273 00:08EF: D0 03        	bne	op6		;no ->
+   274 00:08F1: 4C 9C 09     	jmp	rcvfil		;go receive a file
+   275 00:08F4: C9 50        op6	cmp	#'P'		;print input
+   276 00:08F6: D0 03        	bne	op7		;no ->
+   277 00:08F8: 4C 1F 09     	jmp	prndta		;go print file
+   278 00:08FB: 4C AA 11     OP7	jmp	badopt		;none left, error exit
+   279                        ;
+   280                        ;*	TERM: Terminal mode		 *
+   281                        ;
+   282                        ;This program simply sends keyed characters
+   283                        ;down the line, and displays characters
+   284                        ;received from the line. This makes it
+   285                        ;suitable for communication with time sharing
+   286                        ;computers, CBBS's, or another program
+   287                        ;running "XMODEM E" (echo mode)
+   288                        ;
+   289                        ;Type CTRL-E to exit and warm boot.
+   290                        ;
+   291                        ;NOTE: The "DISCCHR" has not been implemented in
+   292                        ;this version of MODEM.
+   293                        ;
+   294 00:08FE: 20 3A 08     term	jsr	chkc		;test for byte ready
+   295 00:0901: F0 06        	beq	ckkeys		;none ready
+  Mon Mar 15 2021  1:14                                                                                                    Page 6
+
+
+   296 00:0903: 20 41 08     	jsr	getc		;get modem byte
+   297 00:0906: 20 46 08     	jsr 	output		;output to screen
+   298 00:0909: 20 03 08     ckkeys	jsr	const		;look for keys pressed
+   299 00:090C: 29 FF        	and	#$ff		;test result
+   300 00:090E: F0 EE        	beq	term		;no keys, check modem again
+   301 00:0910: 20 EE 09     	jsr 	coninp		;get the key pressed
+   302 00:0913: C9 05        	cmp	#ctrle		;check for escape code
+   303 00:0915: D0 03        	bne	keys1		;branch if not
+   304 00:0917: 4C 00 01     	jmp	boot		;end
+   305 00:091A: 20 37 08     keys1	jsr	putc		;output it to modem
+   306 00:091D: 80 DF        	bra	term		;go back to modem input
+   307                        ;
+   308                        ;prndta: printer spooler
+   309                        ;
+   310                        ;Type CTRL-E to exit and warm boot.
+   311                        ;
+   312 00:091F: 20 3A 08     prndta	jsr	chkc		;test for byte ready
+   313 00:0922: F0 06        	beq	chkkey		;none ready
+   314 00:0924: 20 41 08     	jsr	getc		;get modem byte
+   315 00:0927: 20 0C 08     	jsr	prnot		;send char to printer
+   316 00:092A: 20 03 08     chkkey	jsr	const		;look for keys pressed
+   317 00:092D: 29 FF        	and	#$ff		;test result
+   318 00:092F: F0 EE        	beq	prndta		;no keys, check modem again
+   319 00:0931: 20 EE 09     	jsr 	coninp		;get the key pressed
+   320 00:0934: C9 05        	cmp	#ctrle		;check for escape code
+   321 00:0936: D0 E7        	bne	prndta		;loop if not
+   322 00:0938: 4C 00 01     	jmp	boot		;end
+   323                        ;
+   324                        ;*	TRMECHO: Terminal with echo  *
+   325                        ;
+   326                        ;Terminal program with echo - see notes
+   327                        ;under "TERM" above
+   328                        ;
+   329                        ;C A U T I O N  Don't run with both computers
+   330                        ;in "ECHO" mode - line errors (or any char)
+   331                        ;will be echoed back and forth ad infinitum.
+   332                        ;
+   333 00:093B: 20 3A 08     trmech	jsr	chkc		;check input status
+   334 00:093E: F0 0B        	beq	ckkey1		;branch if no input
+   335 00:0940: 20 41 08     	jsr	getc		;get modem byte
+   336 00:0943: 48           	pha			;save it
+   337 00:0944: 20 37 08     	jsr	putc		;echo it
+   338 00:0947: 68           	pla			;get it back
+   339 00:0948: 20 46 08     	jsr	output		;output to screen
+   340 00:094B: 20 03 08     CKKEY1	jsr	const		;look for keys pressed
+   341 00:094E: 29 FF        	and	#$ff		;test result
+   342 00:0950: F0 E9        	beq	trmech		;no keys, check modem again
+   343 00:0952: 20 EE 09     	jsr	coninp		;get the key pressed
+   344 00:0955: C9 05        	cmp	#ctrle		;check for escape code
+   345 00:0957: D0 03        	bne	keys2		;branch if not
+   346 00:0959: 4C 00 01     	jmp	boot		;exit
+   347 00:095C: 48           KEYS2	pha			;save it
+   348 00:095D: 20 37 08     	jsr	putc		;output it to modem
+   349 00:0960: 68           	pla			;get it again
+   350 00:0961: 20 46 08     	jsr	output		;put it on the screen
+   351 00:0964: 80 D5        	bra	trmech		;go back for modem input
+   352                        ;
+   353                        ;*	SENDFIL: Sends a DOS/65 file	     *
+   354                        ;
+   355                        ;The DOS/65 file specified in the modem command
+   356                        ;is transferred over the phone to another
+   357                        ;computer running XMODEM with the "R"
+   358                        ;(receive) option. The data is sent one sector
+  Mon Mar 15 2021  1:14                                                                                                    Page 7
+
+
+   359                        ;at a time with headers and checksums, and
+   360                        ;re-transmission on errors.
+   361                        ;
+   362 00:0966: 20 0F 0E     SENFIL	jsr	trap		;check for no name or ambig
+   363 00:0969: 20 7D 0B     	jsr	openfi		;open the file
+   364 00:096C: A9 FF        	lda	#255		;wait up to 255 secs for..
+   365 00:096E: 85 32        	sta	wait		;..initial NAK
+   366 00:0970: 20 CB 0B     	jsr	waitna		;get initial NAK
+   367                        ;
+   368 00:0973: 20 F9 0B     SENDLP	jsr	rdsect		;read a sector
+   369 00:0976: B0 17        	bcs	seneof		;send EOF if done
+   370 00:0978: EE 7B 11     	inc	secnum		;bump sector #
+   371 00:097B: A9 00        	lda	#0		;init error..
+   372 00:097D: 85 34        	sta	errcnt		;..count
+   373                        ;
+   374 00:097F: 20 9F 0C     SENRPT	jsr	senhdr		;send a header
+   375 00:0982: 20 CB 0C     	jsr	sensec		;send the data sector
+   376 00:0985: 20 E4 0C     	jsr	sencks		;send the checksum
+   377 00:0988: 20 06 0D     	jsr	getack		;get the ACK
+   378 00:098B: B0 F2        	bcs	senrpt		;repeat if no ACK
+   379 00:098D: 90 E4        	bcc	sendlp		;loop until EOF
+   380                        ;
+   381                        ;
+   382                        ;File sent, send EOT's
+   383                        ;
+   384 00:098F: A9 04        SENEOF	lda	#EOT		;send..
+   385 00:0991: 20 7F 0F     	jsr	send1		;.. an EOT
+   386 00:0994: 20 06 0D     	jsr	getack		;get the ACK
+   387 00:0997: B0 F6        	bcs	seneof		;repeat if no ACK
+   388 00:0999: 4C 0A 10     	jmp	done		;all done
+   389                        ;
+   390                        ;*	RCVFIL: Receive a file		     *
+   391                        ;
+   392                        ;Receive a file in block format as sent
+   393                        ;by another person doing "XMODEM S fn.ft".
+   394                        ;
+   395 00:099C: 20 0F 0E     RCVFIL	jsr	trap		;check for no name or ambig name
+   396 00:099F: 20 B5 0D     	jsr	erasfi		;erase the file
+   397 00:09A2: 20 68 0D     	jsr	makefi		;..then make new
+   398 00:09A5: 20 CF 10     	jsr	ilprt		;print
+   399 00:09A8: 46 49 4C 45  	byte	"FILE OPEN, READY TO RECEIVE",cr,lf,0
+       00:09AC: 20 4F 50 45 
+       00:09B0: 4E 2C 20 52 
+       00:09B4: 45 41 44 59 
+       00:09B8: 20 54 4F 20 
+       00:09BC: 52 45 43 45 
+       00:09C0: 49 56 45 0D 
+       00:09C4: 0A 00 
+   400                        ;
+   401 00:09C6: 20 FB 09     RCVLP	jsr	rcvsec		;get a sector
+   402 00:09C9: B0 0C        	bcs	rcveot		;got end of transmission
+   403 00:09CB: 20 A5 0E     	jsr	wrsec		;save the sector
+   404 00:09CE: EE 7B 11     	inc	secnum		;bump the sector number
+   405 00:09D1: 20 74 0B     	jsr	sendac		;send the ack
+   406 00:09D4: 4C C6 09     	jmp	rcvlp		;loop until end of file
+   407                        ;
+   408                        ;Got EOT on sector - flush buffers, end
+   409                        ;
+   410 00:09D7: 20 D1 0E     RCVEOT	jsr	wrbloc		;write the last block
+   411 00:09DA: 20 74 0B     	jsr	sendac		;ack the sector
+   412 00:09DD: 20 72 0E     	jsr	closef		;close the file
+   413 00:09E0: 4C 0A 10     	jmp	done		;print message & return
+   414                        ;
+  Mon Mar 15 2021  1:14                                                                                                    Page 8
+
+
+   415                        ;*		SUBROUTINES			 *
+   416                        ;convert character in a from lower case to upper case
+   417 00:09E3: C9 61        lwrupr	cmp	#'a'		;if < a
+   418 00:09E5: 90 06        	bcc	notlc		;then ok
+   419 00:09E7: C9 7B        	cmp	#'z'+1		;if > z
+   420 00:09E9: B0 02        	bcs	notlc		;then ok
+   421 00:09EB: 29 5F        	and	#$5f		;else convert
+   422 00:09ED: 60           notlc	rts
+   423                        ;console input and output with msb clear
+   424                        ;input
+   425 00:09EE: 20 06 08     coninp	jsr	conin		;go to sim
+   426 00:09F1: 29 7F        	and	#$7f		;clear msb
+   427 00:09F3: 60           	rts
+   428                        ;output
+   429 00:09F4: 29 7F        conout	and	#$7f		;clear msb
+   430 00:09F6: 4C 09 08     	jmp	conot		;go to sim
+   431                        ;modem input, output, and status routines
+   432                        ;initialize modem and port
+   433                        ;Initial version leaves just a NOP and a RTS
+   434 00:09F9: EA           intmod	nop			;do nothing
+   435 00:09FA: 60           	rts
+   436                        ;
+   437                        ;---->	RCVSECT: Receive a sector
+   438                        ;
+   439                        ;Returns with carry set if EOT received
+   440                        ;
+   441 00:09FB: A9 00        RCVSEC	lda	#0		;init error count
+   442 00:09FD: 85 34        	sta	errcnt
+   443                        ;
+   444 00:09FF: AD 77 11     RCVRPT	lda	qflg		;quiet?
+   445 00:0A02: F0 1A        	beq	rcvsq		;yes, no stat msg.
+   446 00:0A04: 20 CF 10     	jsr	ilprt		;print
+   447 00:0A07: 41 57 41 49  	byte	"AWAITING #",0
+       00:0A0B: 54 49 4E 47 
+       00:0A0F: 20 23 00 
+   448 00:0A12: AD 7B 11     	lda	secnum		;get sector number
+   449 00:0A15: 18           	clc			;add 1
+   450 00:0A16: 69 01        	adc	#1		;(real later)
+   451 00:0A18: 20 C0 0F     	jsr	hexo		;print in hex
+   452 00:0A1B: 20 64 10     	jsr	crlf		;then cr/lf
+   453                        ;
+   454 00:0A1E: A9 0A        RCVSQ	lda	#10		;10 sec time out
+   455 00:0A20: 85 3C        	sta	seconds		;save it
+   456 00:0A22: 20 41 0F     	jsr	recv		;get SOH/EOT
+   457 00:0A25: B0 37        	bcs	rcvser		;time out
+   458 00:0A27: C9 00        	cmp	#0		;ignore nulls
+   459 00:0A29: F0 D4        	beq	rcvrpt
+   460 00:0A2B: C9 01        	cmp	#SOH		;got SOH?
+   461 00:0A2D: F0 06        	beq	rcv1		;yes, go ->
+   462 00:0A2F: C9 04        	cmp	#EOT		;end of transfer?
+   463 00:0A31: D0 05        	bne	r1		;no, go try again
+   464 00:0A33: 38           	sec			;yes,.. EOT
+   465 00:0A34: 60           	rts			;from rcvsec
+   466                        ;
+   467 00:0A35: 4C D3 0A     RCV1	jmp	rcvsoh
+   468                        ;
+   469                        ;Didn't get SOH or EOT -
+   470                        ;
+   471 00:0A38: 85 42        R1	sta	tmpchr		;save char received
+   472 00:0A3A: AD 77 11     	lda	qflg		;quiet mode?
+   473 00:0A3D: F0 1F        	beq	rcvser		;yes, ->
+   474 00:0A3F: A5 42        RCVSEH	lda	tmpchr		;restore char rcvd
+   475 00:0A41: 20 C0 0F     	jsr	hexo		;print hex char
+  Mon Mar 15 2021  1:14                                                                                                    Page 9
+
+
+   476 00:0A44: 20 CF 10     	jsr	ilprt		;tell user
+   477 00:0A47: 48 24 20 52  	byte	"H$ RECEIVED, NOT SOH",cr,lf,0
+       00:0A4B: 45 43 45 49 
+       00:0A4F: 56 45 44 2C 
+       00:0A53: 20 4E 4F 54 
+       00:0A57: 20 53 4F 48 
+       00:0A5B: 0D 0A 00 
+   478                        ;
+   479                        ;Didn't get valid header - purge the line,
+   480                        ;then send NAK.
+   481                        ;
+   482 00:0A5E: 20 3B 0F     RCVSER	jsr	onesec		;wait one second for character
+   483 00:0A61: 90 FB        	bcc	rcvser		;loop until sender done
+   484 00:0A63: E6 34        	inc	errcnt		;abort if we
+   485 00:0A65: A5 34        	lda	errcnt		;have reached
+   486 00:0A67: C9 0A        	cmp	#errlim		;the error limit
+   487 00:0A69: 90 0A        	bcc	rcvck2		;no, try again
+   488                        ;
+   489                        ;10 errors in a row
+   490                        ;
+   491 00:0A6B: AD 77 11     	lda	qflg		;quiet mode?
+   492 00:0A6E: F0 0D        	beq	rcvsab		;yes, ->
+   493 00:0A70: 20 71 10     RCVCKQ	jsr	ckquit		;Quit?
+   494 00:0A73: D0 08        	bne	rcvsab		;yes, quit ->
+   495                        ;
+   496                        ;Line must be purged because sender probably started
+   497                        ;resending while operator answered RETRY/QUIT prompt.
+   498                        ;
+   499 00:0A75: A9 15        RCVCK2	lda	#NAK		;send a NAK
+   500 00:0A77: 20 7F 0F     	jsr	send1
+   501 00:0A7A: 4C FF 09     	jmp	rcvrpt		;try again ->
+   502                        ;
+   503 00:0A7D: 20 72 0E     RCVSAB	jsr	closef		;keep whatever we got
+   504 00:0A80: 20 CF 10     	jsr	ilprt		;abort
+   505 00:0A83: 2B 2B 55 4E  	byte	"++UNABLE TO RECEIVE BLOCK "
+       00:0A87: 41 42 4C 45 
+       00:0A8B: 20 54 4F 20 
+       00:0A8F: 52 45 43 45 
+       00:0A93: 49 56 45 20 
+       00:0A97: 42 4C 4F 43 
+       00:0A9B: 4B 20 
+   506 00:0A9D: 2D 20 41 42  	byte	"- ABORTING++",cr,lf,0
+       00:0AA1: 4F 52 54 49 
+       00:0AA5: 4E 47 2B 2B 
+       00:0AA9: 0D 0A 00 
+   507 00:0AAC: 4C 31 10     	jmp	erxit		;quit
+   508                        ;Time out on receive
+   509 00:0AAF: AD 77 11     RCVSTO	lda	qflg		;Quiet mode?
+   510 00:0AB2: D0 03        	bne	rcvspt		;no, ->
+   511 00:0AB4: 4C 5E 0A     	jmp	rcvser		;quiet ->
+   512                        ;
+   513 00:0AB7: 20 CF 10     RCVSPT	jsr ilprt		;tell about it
+   514 00:0ABA: 2B 2B 54 49  	byte	"++TIME OUT++",0
+       00:0ABE: 4D 45 20 4F 
+       00:0AC2: 55 54 2B 2B 
+       00:0AC6: 00 
+   515                        ;
+   516 00:0AC7: A5 34        RCVPRN	lda	errcnt		;get error count
+   517 00:0AC9: 20 C0 0F     	jsr	hexo		;print it
+   518 00:0ACC: 20 64 10     	jsr 	crlf		;clean up line
+   519 00:0ACF: 4C 5E 0A     	jmp	rcvser		;try again
+   520                        ;
+   521 00:0AD2: 00           BLK	byte	0
+  Mon Mar 15 2021  1:14                                                                                                    Page 10
+
+
+   522                        ;
+   523                        ;
+   524                        ;Got SOH - get block #, block # complimented
+   525                        ;
+   526 00:0AD3: 20 3B 0F     RCVSOH	jsr	onesec		;wait 1 sec for char
+   527 00:0AD6: B0 D7        	bcs	rcvsto		;time out
+   528 00:0AD8: 8D D2 0A     	sta	blk		;save block number
+   529 00:0ADB: 20 3B 0F     	jsr	onesec		;go back for EOR blk #
+   530 00:0ADE: B0 CF        	bcs	rcvsto		;time out
+   531 00:0AE0: 85 3D        	sta	tmpsec		;save complemented block #
+   532 00:0AE2: A9 FF        	lda	#$ff		;do a ones compliment
+   533 00:0AE4: 45 3D        	eor 	tmpsec		;on it
+   534 00:0AE6: CD D2 0A     	cmp	blk		;is it the same?
+   535 00:0AE9: F0 28        	beq	rcvdat		;yes, get data
+   536                        ;
+   537                        ;Got bad sector #
+   538                        ;
+   539 00:0AEB: AD 77 11     	lda	qflg		;ck quiet flag
+   540 00:0AEE: F0 20        	beq	r2		;yes, ->
+   541                        ;
+   542 00:0AF0: 20 CF 10     RCVBSE	jsr	ilprt		;tell story
+   543 00:0AF3: 2B 2B 42 41  	byte	"++BAD SECTOR # IN HEADER++",cr,lf,0
+       00:0AF7: 44 20 53 45 
+       00:0AFB: 43 54 4F 52 
+       00:0AFF: 20 23 20 49 
+       00:0B03: 4E 20 48 45 
+       00:0B07: 41 44 45 52 
+       00:0B0B: 2B 2B 0D 0A 
+       00:0B0F: 00 
+   544 00:0B10: 4C 5E 0A     R2	jmp	rcvser		;bump error count
+   545                        ;
+   546 00:0B13: AD D2 0A     RCVDAT	lda	blk		;get sector number
+   547 00:0B16: 85 36        	sta	rcvsno		;save it
+   548 00:0B18: A9 00        	lda	#0		;init checksum
+   549 00:0B1A: 85 38        	sta	csum		;count
+   550 00:0B1C: A2 00        	ldx	#0		;set up buffer pointer
+   551 00:0B1E: 86 33        	stx	bufind		;and hold it
+   552                        ;
+   553 00:0B20: 20 3B 0F     RCVCHR	jsr	onesec		;wait for a char
+   554 00:0B23: B0 2B        	bcs	rcv2		;time out
+   555 00:0B25: A6 33        	ldx	bufind		;restore X pointer
+   556 00:0B27: 9D 28 01     	sta	buffer,x	;save the character
+   557 00:0B2A: E6 33        	inc	bufind		;bump the pointer
+   558 00:0B2C: E8           	inx			;has it been 128 chars?
+   559 00:0B2D: E0 80        	cpx	#128
+   560 00:0B2F: D0 EF        	bne	rcvchr		;no, go get the rest
+   561 00:0B31: A5 38        	lda	csum		;verify checksum
+   562 00:0B33: 85 45        	sta	tmpcsm		;save it for a while
+   563 00:0B35: 20 3B 0F     	jsr	onesec		;get the checksum
+   564 00:0B38: B0 16        	bcs	rcv2		;time out
+   565 00:0B3A: C5 45        	cmp	tmpcsm		;is it the same?
+   566 00:0B3C: D0 15        	bne	rcvcer		;no, try again
+   567                        ;
+   568                        ;Got a sector, it's a dup if = prev,
+   569                        ;	or ok if = 1 + prev sector
+   570                        ;
+   571 00:0B3E: A5 36        	lda	rcvsno		;verify the sector number
+   572 00:0B40: 85 3D        	sta	tmpsec		;hold it for a while
+   573 00:0B42: AD 7B 11     	lda 	secnum		;compare the two
+   574 00:0B45: C5 3D        	cmp	tmpsec
+   575 00:0B47: F0 25        	beq	recvac		;same sector
+   576 00:0B49: 1A           	inc	a		;add one to it
+   577 00:0B4A: C5 3D        	cmp	tmpsec		;should be the same
+  Mon Mar 15 2021  1:14                                                                                                    Page 11
+
+
+   578 00:0B4C: D0 2C        	bne	abt		;no match, abort
+   579 00:0B4E: 18           	clc			;carry off
+   580 00:0B4F: 60           	rts			;from rcvsec
+   581                        ;
+   582 00:0B50: 4C AF 0A     RCV2	jmp	rcvsto
+   583                        ;
+   584                        ;Got Checksum
+   585                        ;
+   586 00:0B53: AD 77 11     RCVCER	lda	qflg		;quiet?
+   587 00:0B56: D0 03        	bne	rcvcpr		;no, ->
+   588 00:0B58: 4C 5E 0A     	jmp	rcvser		;quiet ->
+   589                        ;
+   590 00:0B5B: 20 CF 10     RCVCPR	jsr	ilprt		;tell message
+   591 00:0B5E: 2B 2B 43 48  	byte	"++CHECKSUM++",0
+       00:0B62: 45 43 4B 53 
+       00:0B66: 55 4D 2B 2B 
+       00:0B6A: 00 
+   592 00:0B6B: 4C C7 0A     	jmp	rcvprn		;go ->
+   593                        ;
+   594                        ;Previous sector repeated, due to the last ACK
+   595                        ;being garbage. ACK it so sender will catch up
+   596                        ;
+   597 00:0B6E: 20 74 0B     RECVAC	jsr	sendac		;acknowledge the sector
+   598 00:0B71: 4C FB 09     	jmp	rcvsec		;go for more
+   599 00:0B74: A9 06        SENDAC	lda	#ack		;send the
+   600 00:0B76: 20 7F 0F     	jsr	send1		;acknowledgement
+   601 00:0B79: 60           	rts
+   602 00:0B7A: 4C DF 0F     ABT	jmp	abort		;abort transfer
+   603                        ;
+   604                        ;---->	OPENFIL: Opens the file to be sent.
+   605                        ;
+   606 00:0B7D: A9 07        OPENFI	lda	#<fcb		;point to the file
+   607 00:0B7F: A0 01        	ldy	#>fcb		;to open
+   608 00:0B81: A2 0F        	ldx	#open		;get the function
+   609 00:0B83: 20 03 01     	jsr	pem		;open the file
+   610 00:0B86: 10 1A        	bpl	openok		;open ok?
+   611 00:0B88: 20 CF 10     	jsr	ilprt		;no, print message..
+   612 00:0B8B: 43 41 4E 20  	byte	"CAN NOT OPEN FILE",cr,lf,0
+       00:0B8F: 4E 4F 54 20 
+       00:0B93: 4F 50 45 4E 
+       00:0B97: 20 46 49 4C 
+       00:0B9B: 45 0D 0A 00 
+   613 00:0B9F: 4C 31 10     	jmp	erxit		;get out
+   614 00:0BA2: 20 CF 10     OPENOK	jsr	ilprt		;print...
+   615 00:0BA5: 46 49 4C 45  	byte	"FILE OPEN, EXTENT LENGTH: $",0
+       00:0BA9: 20 4F 50 45 
+       00:0BAD: 4E 2C 20 45 
+       00:0BB1: 58 54 45 4E 
+       00:0BB5: 54 20 4C 45 
+       00:0BB9: 4E 47 54 48 
+       00:0BBD: 3A 20 24 00 
+   616 00:0BC1: AD 16 01     	lda	fcb+15		;get the number of sectors
+   617 00:0BC4: 20 C0 0F     	jsr	hexo		;print it
+   618 00:0BC7: 20 64 10     	jsr	crlf		;clean up the line
+   619 00:0BCA: 60           	rts
+   620                        ;
+   621                        ;---->	WAITNAK: Waits for initial NAK
+   622                        ;3
+   623                        ;To ensure no data is sent until the receiving
+   624                        ;program is ready, this routine waits for
+   625                        ;the first time out-NAK from the receiver.
+   626                        ;(WAIT) contains the # of seconds to wait.
+   627                        ;
+  Mon Mar 15 2021  1:14                                                                                                    Page 12
+
+
+   628 00:0BCB: AD 77 11     WAITNA	lda	qflg		;quiet mode?
+   629 00:0BCE: F0 1A        	beq	waitnl		;yes, ->
+   630 00:0BD0: 20 CF 10     WAITNP	jsr	ilprt		;print...
+   631 00:0BD3: 41 57 41 49  	byte	"AWAITING INITIAL NAK",cr,lf,0
+       00:0BD7: 54 49 4E 47 
+       00:0BDB: 20 49 4E 49 
+       00:0BDF: 54 49 41 4C 
+       00:0BE3: 20 4E 41 4B 
+       00:0BE7: 0D 0A 00 
+   632 00:0BEA: 20 3B 0F     WAITNL	jsr	onesec		;wait one sec for NAK
+   633 00:0BED: C9 15        	cmp	#NAK		;did we get it?
+   634 00:0BEF: D0 01        	bne	nonak		;no, ->
+   635 00:0BF1: 60           	rts			;yes, return
+   636 00:0BF2: C6 32        NONAK	dec	wait		;drop the count
+   637 00:0BF4: D0 F4        	bne	waitnl		;if not time out, ->
+   638 00:0BF6: 4C DF 0F     	jmp	abort		;time out, abort ->
+   639                        ;
+   640                        ;---->	RDSECT: Reads a sector.
+   641                        ;
+   642                        ;For speed this routine buffers up 16
+   643                        ;sectors at a time.
+   644                        ;
+   645 00:0BF9: C6 35        RDSECT	dec	secinb		;see if any sectors in buffer
+   646 00:0BFB: 30 25        	bmi	rdbloc		;get more ->
+   647 00:0BFD: AD 79 11     	lda	secptr		;point to the data buffer
+   648 00:0C00: AC 7A 11     	ldy	secptr+1
+   649 00:0C03: 85 3E        	sta	from		;set up for a move
+   650 00:0C05: 84 3F        	sty	from+1
+   651 00:0C07: A9 28        	lda	#<buffer	;destination buffer address
+   652 00:0C09: A0 01        	ldy	#>buffer
+   653 00:0C0B: 85 40        	sta	to		;for the move
+   654 00:0C0D: 84 41        	sty	to+1
+   655 00:0C0F: 20 9D 11     	jsr	mov128		;move a sector to buffer
+   656 00:0C12: 18           	clc			;set up for an add
+   657 00:0C13: AD 79 11     	lda	secptr		;to point to the next
+   658 00:0C16: 69 80        	adc	#128		;sector to move
+   659 00:0C18: 8D 79 11     	sta	secptr		;save it
+   660 00:0C1B: 90 04        	bcc	rds1		;no carry, ->
+   661 00:0C1D: EE 7A 11     	inc	secptr+1	;bump high pointer
+   662 00:0C20: 18           	clc			;say ok
+   663 00:0C21: 60           RDS1	rts			;from rdsect
+   664 00:0C22: A5 39        RDBLOC	lda	eoflg		;get EOF flag
+   665 00:0C24: C9 01        	cmp	#1		;is it set?
+   666 00:0C26: D0 02        	bne	rdb1		;no, ->
+   667 00:0C28: 38           	sec			;carry set for EOF
+   668 00:0C29: 60           	rts
+   669 00:0C2A: A9 00        RDB1	lda	#0		;initialize sector counter
+   670 00:0C2C: 85 43        	sta	seccnt
+   671 00:0C2E: A9 81        	lda	#<dbuf		;set up destination address
+   672 00:0C30: A0 15        	ldy	#>dbuf		;for transfer
+   673 00:0C32: 85 40        	sta	to		;save it..
+   674 00:0C34: 84 41        	sty	to+1
+   675 00:0C36: A5 40        RDSECL	lda	to		;get the address for DOS
+   676 00:0C38: A4 41        	ldy	to+1
+   677 00:0C3A: A2 1A        	ldx	#stdma		;get the function
+   678 00:0C3C: 20 03 01     	jsr	pem		;set the DMA address
+   679 00:0C3F: A9 07        	lda	#<fcb		;point to the...
+   680 00:0C41: A0 01        	ldy	#>fcb		;...fcb file
+   681 00:0C43: A2 14        	ldx	#read		;get read function
+   682 00:0C45: 20 03 01     	jsr	pem		;read sector into memory
+   683 00:0C48: F0 20        	beq	rdseco		;read ok, ->
+   684 00:0C4A: 10 35        	bpl	reof		;found EOF, ->
+   685 00:0C4C: 20 CF 10     	jsr	ilprt		;file error, print..
+  Mon Mar 15 2021  1:14                                                                                                    Page 13
+
+
+   686 00:0C4F: 0D 0A 2B 2B  	byte	cr,lf,"++FILE READ ERROR++",cr,lf,0
+       00:0C53: 46 49 4C 45 
+       00:0C57: 20 52 45 41 
+       00:0C5B: 44 20 45 52 
+       00:0C5F: 52 4F 52 2B 
+       00:0C63: 2B 0D 0A 00 
+   687 00:0C67: 4C 31 10     	jmp	erxit		;get out
+   688 00:0C6A: 18           RDSECO	clc			;add the length..
+   689 00:0C6B: A5 40        	lda	to		;..of one sector..
+   690 00:0C6D: 69 80        	adc	#128		;..to the next..
+   691 00:0C6F: 85 40        	sta	to		;..buffer
+   692 00:0C71: A5 41        	lda	to+1
+   693 00:0C73: 69 00        	adc	#0
+   694 00:0C75: 85 41        	sta	to+1
+   695 00:0C77: E6 43        	inc	seccnt		;increment the counter
+   696 00:0C79: A5 43        	lda	seccnt		;16 yet?
+   697 00:0C7B: C9 10        	cmp	#16
+   698 00:0C7D: F0 08        	beq	rdbful		;yes, ->
+   699 00:0C7F: D0 B5        	bne	rdsecl		;no, read some more
+   700 00:0C81: A9 01        REOF	lda	#1		;set the EOF flag
+   701 00:0C83: 85 39        	sta	eoflg
+   702 00:0C85: A5 43        	lda	seccnt		;get the sector load count
+   703 00:0C87: 85 35        RDBFUL	sta	secinb		;save the sector count
+   704 00:0C89: A9 81        	lda	#<dbuf		;initialize the buffer
+   705 00:0C8B: A0 15        	ldy	#>dbuf		;pointer
+   706 00:0C8D: 8D 79 11     	sta	secptr		;save it
+   707 00:0C90: 8C 7A 11     	sty	secptr+1
+   708 00:0C93: A9 28        	lda	#<buffer	;reset the DMA address
+   709 00:0C95: A0 01        	ldy	#>buffer
+   710 00:0C97: A2 1A        	ldx	#stdma		;get the DMA function
+   711 00:0C99: 20 03 01     	jsr	pem		;reset DMA address
+   712 00:0C9C: 4C F9 0B     	jmp	rdsect		;go, ->
+   713                        ;
+   714                        ;---->	SENHDR: Send record header
+   715                        ;
+   716 00:0C9F: AD 77 11     SENHDR	lda	qflg		;quiet mode?
+   717 00:0CA2: F0 13        	beq	sendhn		;yes, ->
+   718 00:0CA4: 20 CF 10     	jsr	ilprt		;print...
+   719 00:0CA7: 53 45 4E 44  	byte	"SEND #",0
+       00:0CAB: 20 23 00 
+   720 00:0CAE: AD 7B 11     	lda	secnum		;get sector #
+   721 00:0CB1: 20 C0 0F     	jsr	hexo		;print it
+   722 00:0CB4: 20 64 10     	jsr	crlf		;clean up
+   723 00:0CB7: A9 01        SENDHN	lda	#SOH		;send...
+   724 00:0CB9: 20 7F 0F     	jsr	send1		;...SOH,
+   725 00:0CBC: AD 7B 11     	lda	secnum		;then send..
+   726 00:0CBF: 20 7F 0F     	jsr	send1		;sector #
+   727 00:0CC2: A9 FF        	lda	#$FF		;then sector #
+   728 00:0CC4: 4D 7B 11     	eor	secnum		;complemented
+   729 00:0CC7: 20 7F 0F     	jsr	send1		;..sector #
+   730 00:0CCA: 60           	rts			;from SENDHDR
+   731                        ;
+   732                        ;---->	SENDSEC: Send the data sector
+   733                        ;
+   734 00:0CCB: A2 00        SENSEC	ldx	#0		;init checksum
+   735 00:0CCD: 86 38        	stx	csum		;.. and..
+   736 00:0CCF: 86 33        	stx	bufind		;buffer offset
+   737 00:0CD1: A9 80        	lda	#128		;set up counter..
+   738 00:0CD3: 85 44        	sta	sndcnt		;for # of bytes
+   739 00:0CD5: A6 33        SENDC	ldx	bufind		;get offset into buffer
+   740 00:0CD7: BD 28 01     	lda	buffer,x	;get data
+   741 00:0CDA: E6 33        	inc	bufind		;bump offset
+   742 00:0CDC: 20 7F 0F     	jsr	send1		;send data
+  Mon Mar 15 2021  1:14                                                                                                    Page 14
+
+
+   743 00:0CDF: C6 44        	dec	sndcnt		;drop counter
+   744 00:0CE1: D0 F2        	bne 	sendc		;not done, ->
+   745 00:0CE3: 60           	rts			;from Sendsec
+   746                        ;
+   747                        ;Send the checksum
+   748                        ;
+   749 00:0CE4: A5 38        SENCKS	lda	csum		;get the checksum
+   750 00:0CE6: 4C 7F 0F     	jmp	send1		;send it
+   751                        ;
+   752                        ;Time out getting ACK
+   753                        ;
+   754 00:0CE9: AD 77 11     GETTOT	lda	qflg		;quiet mode
+   755 00:0CEC: F0 4C        	beq	ackerr		;yes, ->
+   756 00:0CEE: 20 CF 10     	jsr	ilprt		;print..
+   757 00:0CF1: 54 49 4D 45  	byte	"TIME OUT ON ACK",cr,lf,0
+       00:0CF5: 20 4F 55 54 
+       00:0CF9: 20 4F 4E 20 
+       00:0CFD: 41 43 4B 0D 
+       00:0D01: 0A 00 
+   758 00:0D03: 4C 3A 0D     	jmp	ackerr		;abort
+   759                        ;
+   760                        ;---->	GETACK: Get the ACK on the sector
+   761                        ;
+   762                        ;Returns with carry clear if ACK received.
+   763                        ;if an ACK is not received, the error count
+   764                        ;is incremented, and if less than "ERRLIM",
+   765                        ;carry is set and control returns. If the
+   766                        ;error count is at "ERRLIM", the program
+   767                        ;aborts if in "QUIET" mode, or asks the
+   768                        ;user for quit/retry if not.
+   769                        ;
+   770 00:0D06: A9 0A        GETACK	lda	#10		;wait ten secs...
+   771 00:0D08: 85 3C        	sta	seconds		;..MAX
+   772 00:0D0A: 20 41 0F     	jsr	recvdg		;recv w/garbage collect
+   773 00:0D0D: B0 DA        	bcs	gettot		;timed out, ->
+   774 00:0D0F: C9 06        	cmp	#ACK		;ok?
+   775 00:0D11: D0 02        	bne	getak1		;no, error ->
+   776 00:0D13: 18           	clc			;carry off
+   777 00:0D14: 60           	rts			;ok, ->
+   778 00:0D15: 48           GETAK1	pha			;hold char recv'd
+   779 00:0D16: AD 77 11     	lda	qflg		;quiet mode?
+   780 00:0D19: F0 1E        	beq	acker2		;yes, ->
+   781 00:0D1B: 68           	pla			;get char recv'd
+   782 00:0D1C: 48           	pha			;save it again
+   783 00:0D1D: 20 C0 0F     	jsr	hexo		;print it in Hex
+   784 00:0D20: 20 CF 10     	jsr	ilprt		;print mess..
+   785 00:0D23: 48 20 52 45  	byte	"H RECEIVED, NOT ACK",cr,lf,0
+       00:0D27: 43 45 49 56 
+       00:0D2B: 45 44 2C 20 
+       00:0D2F: 4E 4F 54 20 
+       00:0D33: 41 43 4B 0D 
+       00:0D37: 0A 00 
+   786 00:0D39: 68           ACKER2	pla			;clean up stack
+   787 00:0D3A: E6 34        ACKERR	inc	errcnt		;bump the error count
+   788 00:0D3C: A5 34        	lda	errcnt		;10 errors?
+   789 00:0D3E: C9 0A        	cmp	#errlim
+   790 00:0D40: F0 02        	beq	acker1		;yes, ->
+   791 00:0D42: 38           	sec			;show error,
+   792 00:0D43: 60           	rts			;return, not at limit
+   793 00:0D44: AD 77 11     ACKER1	lda	qflg		;quiet mode?
+   794 00:0D47: F0 07        	beq	csabor		;yes, abort transfer
+   795 00:0D49: 20 71 10     GACKV	jsr	ckquit		;see if user wants to quit
+   796 00:0D4C: D0 02        	bne	csabor		;yes they do
+  Mon Mar 15 2021  1:14                                                                                                    Page 15
+
+
+   797 00:0D4E: 38           	sec			;no, try again
+   798 00:0D4F: 60           	rts
+   799 00:0D50: 20 CF 10     CSABOR	jsr	ilprt		;print..
+   800 00:0D53: 54 49 4D 45  	byte	"TIME OUT ON ACK",cr,lf,0
+       00:0D57: 20 4F 55 54 
+       00:0D5B: 20 4F 4E 20 
+       00:0D5F: 41 43 4B 0D 
+       00:0D63: 0A 00 
+   801 00:0D65: 4C 31 10     	jmp	erxit		;abort transfer ->
+   802                        ;
+   803                        ;----> MAKEFILE: Makes the file to be received.
+   804                        ;
+   805 00:0D68: A9 07        MAKEFI	lda	#<fcb		;load a & y with
+   806 00:0D6A: A0 01        	ldy	#>fcb		;the fcb address
+   807 00:0D6C: A2 16        	ldx 	#make		;set x to make a file
+   808 00:0D6E: 20 03 01     	jsr	pem		;make the file
+   809 00:0D71: 10 41        	bpl	mak1		;ok, file made ->
+   810 00:0D73: 20 CF 10     	jsr 	ilprt		;tell the user the bad news
+   811 00:0D76: 2B 2B 45 52  	byte	"++ERROR - CAN NOT MAKE FILE++",cr,lf
+       00:0D7A: 52 4F 52 20 
+       00:0D7E: 2D 20 43 41 
+       00:0D82: 4E 20 4E 4F 
+       00:0D86: 54 20 4D 41 
+       00:0D8A: 4B 45 20 46 
+       00:0D8E: 49 4C 45 2B 
+       00:0D92: 2B 0D 0A 
+   812 00:0D95: 2B 2B 44 49  	byte	"++DIRECTORY MAY BE FULL++",cr,lf,0
+       00:0D99: 52 45 43 54 
+       00:0D9D: 4F 52 59 20 
+       00:0DA1: 4D 41 59 20 
+       00:0DA5: 42 45 20 46 
+       00:0DA9: 55 4C 4C 2B 
+       00:0DAD: 2B 0D 0A 00 
+   813 00:0DB1: 4C 31 10     	jmp	erxit		;get out
+   814 00:0DB4: 60           MAK1	rts			;done with makefile
+   815                        ;
+   816                        ;----> ERASEFILE: Erase the incoming file.
+   817                        ;
+   818                        ;If it exist, ask if it may be erased.
+   819                        ;
+   820 00:0DB5: A9 07        ERASFI	lda	#<fcb		;point a & y to the
+   821 00:0DB7: A0 01        	ldy	#>fcb		;fcb address
+   822 00:0DB9: A2 11        	ldx	#srchf		;set x to look for file
+   823 00:0DBB: 20 03 01     	jsr	pem		;search for file name
+   824 00:0DBE: 30 4E        	bmi	er1		;if not found then ->
+   825 00:0DC0: 20 CF 10     	jsr 	ilprt		;give the message
+   826 00:0DC3: 46 49 4C 45  	byte	"FILE EXISTS, TYPE Y TO ERASE "
+       00:0DC7: 20 45 58 49 
+       00:0DCB: 53 54 53 2C 
+       00:0DCF: 20 54 59 50 
+       00:0DD3: 45 20 59 20 
+       00:0DD7: 54 4F 20 45 
+       00:0DDB: 52 41 53 45 
+       00:0DDF: 20 
+   827 00:0DE0: 4F 54 48 45  	byte	"OTHER TO QUIT",cr,lf,0
+       00:0DE4: 52 20 54 4F 
+       00:0DE8: 20 51 55 49 
+       00:0DEC: 54 0D 0A 00 
+   828 00:0DF0: 20 EE 09     	jsr	coninp		;get the input
+   829 00:0DF3: 48           	pha			;save it
+   830 00:0DF4: 20 46 08     	jsr	output		;print it
+   831 00:0DF7: 20 64 10     	jsr	crlf		;clean up the line
+   832 00:0DFA: 68           	pla			;get char back
+  Mon Mar 15 2021  1:14                                                                                                    Page 16
+
+
+   833 00:0DFB: 20 E3 09     	jsr	lwrupr		;convert to upper case
+   834 00:0DFE: C9 59        	cmp	#'Y'		;was it 'yes'
+   835 00:0E00: F0 03        	beq 	er2		;yes, ->
+   836 00:0E02: 4C 31 10     	jmp	ckdis		;no, get out
+   837 00:0E05: A9 07        ER2	lda	#<fcb		;set a & y to the
+   838 00:0E07: A0 01        	ldy	#>fcb		;fcb address
+   839 00:0E09: A2 13        	ldx	#erase		;set x to erase
+   840 00:0E0B: 20 03 01     	jsr 	pem		;erase the file name
+   841 00:0E0E: 60           ER1	rts			;from erasefile
+   842                        ;
+   843                        ;----> TRAP: Check for no file name or ambiguous name
+   844                        ;
+   845 00:0E0F: A2 01        TRAP	ldx	#1		;point to 1st char in fcb
+   846 00:0E11: BD 07 01     	lda	fcb,x		;get it
+   847 00:0E14: C9 20        	cmp	#space		;is it blank?
+   848 00:0E16: D0 23        	bne	atrap		;no, the names there
+   849 00:0E18: 20 CF 10     	jsr	ilprt		;tell the user
+   850 00:0E1B: 2B 2B 4E 4F  	byte	"++NO FILE NAME SPECIFIED++",cr,lf,0
+       00:0E1F: 20 46 49 4C 
+       00:0E23: 45 20 4E 41 
+       00:0E27: 4D 45 20 53 
+       00:0E2B: 50 45 43 49 
+       00:0E2F: 46 49 45 44 
+       00:0E33: 2B 2B 0D 0A 
+       00:0E37: 00 
+   851 00:0E38: 4C 31 10     	jmp	erxit		;get out
+   852 00:0E3B: BD 07 01     ATRAP	lda	fcb,x		;now look for ambig
+   853 00:0E3E: C9 3F        	cmp	#'?'		;chars in file name
+   854 00:0E40: F0 06        	beq	trerr		;branch if found
+   855 00:0E42: E8           	inx			;bump the pointer
+   856 00:0E43: E0 0B        	cpx	#11		;looked at all chars yet?
+   857 00:0E45: D0 F4        	bne	atrap		;no ->
+   858 00:0E47: 60           	rts			;from TRAP
+   859 00:0E48: 20 CF 10     TRERR	jsr	ilprt		;tell the user
+   860 00:0E4B: 2B 2B 43 41  	byte	"++CAN NOT USE WILD CARD"
+       00:0E4F: 4E 20 4E 4F 
+       00:0E53: 54 20 55 53 
+       00:0E57: 45 20 57 49 
+       00:0E5B: 4C 44 20 43 
+       00:0E5F: 41 52 44 
+   861 00:0E62: 20 4F 50 54  	byte	" OPTIONS++",cr,lf,0
+       00:0E66: 49 4F 4E 53 
+       00:0E6A: 2B 2B 0D 0A 
+       00:0E6E: 00 
+   862 00:0E6F: 4C 31 10     	jmp	erxit		;bad exit form TRAP
+   863                        ;
+   864                        ;----> CLOSEFILE: Closes the received file.
+   865                        ;
+   866 00:0E72: A9 07        CLOSEF	lda	#<fcb		;a & y point
+   867 00:0E74: A0 01        	ldy	#>fcb		;to the file
+   868 00:0E76: A2 10        	ldx	#close		;set x to close code
+   869 00:0E78: 20 03 01     	jsr 	pem		;close the file
+   870 00:0E7B: 10 27        	bpl	clo1		;if OK ->
+   871 00:0E7D: 20 CF 10     	jsr	ilprt		;give error message
+   872 00:0E80: 2B 2B 43 41  	byte	"++CAN NOT CLOSE FILE - ERROR++"
+       00:0E84: 4E 20 4E 4F 
+       00:0E88: 54 20 43 4C 
+       00:0E8C: 4F 53 45 20 
+       00:0E90: 46 49 4C 45 
+       00:0E94: 20 2D 20 45 
+       00:0E98: 52 52 4F 52 
+       00:0E9C: 2B 2B 
+   873 00:0E9E: 0D 0A 00     	byte	cr,lf,0
+  Mon Mar 15 2021  1:14                                                                                                    Page 17
+
+
+   874 00:0EA1: 4C 31 10     	jmp	erxit		;error exit
+   875 00:0EA4: 60           clo1	rts			;from closef
+   876                        ;
+   877                        ;---->	WRSEC: Write a sector
+   878                        ;
+   879                        ;Writes the sector into a buffer. When 16
+   880                        ;have been written, writes the block to disk.
+   881                        ;
+   882                        ;entry point "WRBLOC" flushes the buffer at EOF.
+   883                        ;
+   884 00:0EA5: A9 28        WRSEC	lda	#<buffer	;set up a & y
+   885 00:0EA7: A0 01        	ldy	#>buffer	;for a move to
+   886 00:0EA9: 85 3E        	sta	from		;track buffer
+   887 00:0EAB: 84 3F        	sty	from+1
+   888 00:0EAD: AD 79 11     	lda	secptr
+   889 00:0EB0: AC 7A 11     	ldy	secptr+1
+   890 00:0EB3: 85 40        	sta	to
+   891 00:0EB5: 84 41        	sty	to+1
+   892 00:0EB7: 20 9D 11     	jsr	mov128		;move 128 bytes
+   893 00:0EBA: 18           	clc			;bump the sector pointer
+   894 00:0EBB: AD 79 11     	lda	secptr		;ahead 128 bytes
+   895 00:0EBE: 69 80        	adc	#128
+   896 00:0EC0: 8D 79 11     	sta	secptr		;save it
+   897 00:0EC3: 90 03        	bcc	wrs1		;branch if no carry
+   898 00:0EC5: EE 7A 11     	inc	secptr+1	;bump the high byte
+   899 00:0EC8: E6 35        WRS1	inc	secinb		;bump the sector count moved
+   900 00:0ECA: A5 35        	lda	secinb		;check for a full track yet
+   901 00:0ECC: C9 10        	cmp	#16		;16 sectors = 1 track
+   902 00:0ECE: F0 01        	beq	wrbloc		;yes, ->
+   903 00:0ED0: 60           	rts			;from WRSEC
+   904                        ;
+   905                        ;---->	WRBLOC: Writes a block to disk
+   906                        ;
+   907 00:0ED1: A5 35        WRBLOC	lda	secinb		;see if there is anything
+   908 00:0ED3: F0 FB        	beq	wrbloc-1	;to write. no, ->
+   909 00:0ED5: 85 43        	sta	seccnt		;save the sector count
+   910 00:0ED7: A9 81        	lda	#<dbuf		;set the DMA address
+   911 00:0ED9: A0 15        	ldy	#>dbuf		;to the track buffer
+   912 00:0EDB: 85 40        	sta	to		;save address
+   913 00:0EDD: 84 41        	sty	to+1
+   914 00:0EDF: A2 1A        DKWRLP	ldx	#stdma		;set x = set DMA
+   915 00:0EE1: 20 03 01     	jsr	pem		;set the buffer address
+   916 00:0EE4: A9 07        	lda	#<fcb		;set up for a file write
+   917 00:0EE6: A0 01        	ldy	#>fcb
+   918 00:0EE8: A2 15        	ldx	#write		;x = Write
+   919 00:0EEA: 20 03 01     	jsr 	pem		;write a sector
+   920 00:0EED: D0 2A        	bne	wrerr		;error? ->
+   921 00:0EEF: 18           	clc			;now point to next sector
+   922 00:0EF0: A5 40        	lda	to
+   923 00:0EF2: 69 80        	adc	#128
+   924 00:0EF4: 85 40        	sta	to
+   925 00:0EF6: 90 02        	bcc	wrs3
+   926 00:0EF8: E6 41        	inc	to+1
+   927 00:0EFA: A5 40        WRS3	lda	to		;get new DMA address
+   928 00:0EFC: A4 41        	ldy	to+1		;into a & y
+   929 00:0EFE: C6 43        	dec	seccnt		;drop the sector count
+   930 00:0F00: D0 DD        	bne	dkwrlp		;more to write ->
+   931 00:0F02: A9 00        	lda	#0		;put zero into sector count
+   932 00:0F04: 85 35        	sta	secinb
+   933 00:0F06: A9 81        	lda	#<dbuf		;set pointers to the start
+   934 00:0F08: A0 15        	ldy	#>dbuf		;of the track buffer
+   935 00:0F0A: 8D 79 11     	sta	secptr
+   936 00:0F0D: 8C 7A 11     	sty	secptr+1
+  Mon Mar 15 2021  1:14                                                                                                    Page 18
+
+
+   937 00:0F10: A9 28        RSDMA	lda	#<buffer	;set DMA address to the
+   938 00:0F12: A0 01        	ldy	#>buffer	;default buffer
+   939 00:0F14: A2 1A        	ldx	#stdma		;x = set DMA
+   940 00:0F16: 4C 03 01     	jmp	pem		;set default buffer address
+   941                        ;error writing to file
+   942 00:0F19: 20 10 0F     WRERR	jsr	rsdma		;reset buffer address
+   943 00:0F1C: 20 CF 10     	jsr	ilprt		;tell the bad news
+   944 00:0F1F: 2B 2B 45 52  	byte	"++ERROR WRITING FILE++",cr,lf,0
+       00:0F23: 52 4F 52 20 
+       00:0F27: 57 52 49 54 
+       00:0F2B: 49 4E 47 20 
+       00:0F2F: 46 49 4C 45 
+       00:0F33: 2B 2B 0D 0A 
+       00:0F37: 00 
+   945 00:0F38: 4C DF 0F     	jmp	abort		;abort
+   946                        ;Enter RECV and use one second
+   947 00:0F3B: A9 01        ONESEC	lda	#1		;set up for a one second
+   948 00:0F3D: 85 3C        	sta	seconds		;wait on receive char
+   949 00:0F3F: D0 00        	bne	recv		;always ->
+   950                        ;
+   951                        ;---->	RECV: Receive a character
+   952                        ;
+   953                        ;Time out time is in SECONDS, in seconds. Entry via
+   954                        ;"RECVDG" deletes garbage characters on the
+   955                        ;line. For example, having just sent a sector,
+   956                        ;calling RECVDG will delete any line-noise-induced
+   957                        ;characters long before the ACK/NAK would
+   958                        ;be received.
+   959                        ;The operations involved in the inner timing
+   960                        ;loop with number of clock cycles required are:
+   961                        ;	jsr	35
+   962                        ;	beq	4
+   963                        ;	jsr	7x12
+   964                        ;	lda	3
+   965                        ;	bne	4
+   966                        ;	dec	5
+   967                        ;	lda	3
+   968                        ;	ora	3
+   969                        ;	bne	4
+   970                        ; TOTAL		145
+   971                        ;With 8 MHz CPU clock this means inner loop can consume
+   972                        ;up to 4640 usec in the inner loop. Adding the small
+   973                        ;outer loop delays says 221 outer loop cycles
+   974                        ;will yield e delay time of 1 second.
+   975                        ;
+   976                        recvdg
+   977 00:0F41: A9 00        RECV	lda	#0		;set up for a delay loop
+   978 00:0F43: 85 3A        	sta	inner		;start inner at 256
+   979 00:0F45: A9 DD        	lda	#221		;then outer at 227
+   980 00:0F47: 85 3B        	sta	outer
+   981 00:0F49: 20 3A 08     mwti	jsr	chkc		;test input status
+   982 00:0F4C: F0 08        	beq	nochar		;not ready, ->
+   983 00:0F4E: 20 41 08     	jsr	getc		;receive a char
+   984 00:0F51: 20 92 0F     	jsr	chksum		;update the checksum count
+   985 00:0F54: 18           	clc			;carry clear = got char
+   986 00:0F55: 60           	rts			;from RECV
+   987                        ;count down the timers
+   988 00:0F56: 20 7E 0F     NOCHAR	jsr	rdelay		;add 12 cycles of delay
+   989 00:0F59: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+   990 00:0F5C: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+   991 00:0F5F: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+   992 00:0F62: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+   993 00:0F65: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+  Mon Mar 15 2021  1:14                                                                                                    Page 19
+
+
+   994 00:0F68: 20 7E 0F     	jsr	rdelay		;add 12 cycles of delay
+   995 00:0F6B: A5 3A        	lda	inner		;see if inner 0
+   996 00:0F6D: D0 02        	bne	nochrz		;skip if non zero
+   997 00:0F6F: C6 3B        	dec	outer		;but drop outer if inner 0
+   998 00:0F71: C6 3A        nochrz	dec	inner		;always drop inner
+   999 00:0F73: A5 3A        	lda	inner		;check for zero result
+  1000 00:0F75: 05 3B        	ora	outer
+  1001 00:0F77: D0 D0        	bne	mwti		;loop if not zero
+  1002 00:0F79: C6 3C        	dec 	seconds		;dec the seconds count
+  1003 00:0F7B: D0 C4        	bne	recv		;wait more? ->
+  1004 00:0F7D: 38           	sec			;carry set = time out
+  1005 00:0F7E: 60           rdelay	rts			;from RECV
+  1006                        ;
+  1007                        ;---->	SEND: Send a character to the modem
+  1008                        ;
+  1009                        ;	CTRL-C will abort the transfer and send a CAN
+  1010                        ;
+  1011 00:0F7F: 20 92 0F     SEND1	jsr	chksum		;update the checksum
+  1012 00:0F82: 20 37 08     	jsr	putc		;send the char
+  1013 00:0F85: 20 D4 0F     	jsr	polkey		;poll for a key pressed
+  1014 00:0F88: C9 03        	cmp	#ctrlc		;control-c ?
+  1015 00:0F8A: D0 05        	bne 	nostop		;no ->
+  1016 00:0F8C: 68           	pla			;yes, pop return address
+  1017 00:0F8D: 68           	pla			;to here
+  1018 00:0F8E: 4C DF 0F     	jmp	abort		;exit
+  1019 00:0F91: 60           NOSTOP	rts			;from SEND1
+  1020                        ;calculate checksum using byte in a while saving A
+  1021 00:0F92: 08           chksum	php			;save status
+  1022 00:0F93: 48           	pha			;then byte
+  1023 00:0F94: 18           	clc			;set up for an add
+  1024 00:0F95: 65 38        	adc	csum		;add it to checksum
+  1025 00:0F97: 85 38        	sta	csum		;save it
+  1026 00:0F99: 68           	pla			;get byte
+  1027 00:0F9A: 28           	plp			;then status
+  1028 00:0F9B: 60           	rts			;from CHKSUM
+  1029                        ;
+  1030                        ;---->	SHOW: Shows chars sent/received
+  1031                        ;
+  1032                        ;CR, LF, and TAB are shown. All other
+  1033                        ;non-printable characters are shown in
+  1034                        ;hex as (XX)
+  1035                        ;
+  1036 00:0F9C: C9 0A        SHOW	cmp	#lf		;is it a linefeed?
+  1037 00:0F9E: F0 1C        	beq	ctype		;yes, ->
+  1038 00:0FA0: C9 0D        	cmp	#cr		;is it a cr
+  1039 00:0FA2: F0 18        	beq	ctype		;yes, ->
+  1040 00:0FA4: C9 09        	cmp	#tab		;Tab?
+  1041 00:0FA6: F0 14        	beq	ctype		;yes, ->
+  1042 00:0FA8: C9 20        	cmp	#space		;control char?
+  1043 00:0FAA: 90 04        	bcc	showhe		;yes, ->
+  1044 00:0FAC: C9 7F        	cmp	#$7f		;ascii?
+  1045 00:0FAE: 90 0C        	bcc	ctype		;yes, ->
+  1046 00:0FB0: 48           SHOWHE	pha			;save char
+  1047 00:0FB1: A9 28        	lda	#'('		;put it in ()
+  1048 00:0FB3: 20 F4 09     	jsr	conout		;type
+  1049 00:0FB6: 68           	pla			;get back char
+  1050 00:0FB7: 20 C0 0F     	jsr	hexo		;print hex char
+  1051 00:0FBA: A9 29        	lda	#')'		;closing ")"
+  1052 00:0FBC: 20 F4 09     CTYPE	jsr	conout		;print char in a
+  1053 00:0FBF: 60           	rts			;from SHOW
+  1054                        ;
+  1055                        ;---->	HEXO:  output byte in a as two hex chars to  console
+  1056                        ;
+  Mon Mar 15 2021  1:14                                                                                                    Page 20
+
+
+  1057 00:0FC0: 48           HEXO	pha			;hold char
+  1058 00:0FC1: 4A           	lsr	a		;get high byte
+  1059 00:0FC2: 4A           	lsr	a
+  1060 00:0FC3: 4A           	lsr	a
+  1061 00:0FC4: 4A           	lsr	a
+  1062 00:0FC5: 20 C9 0F     	jsr	nibbl		;print high nibble
+  1063 00:0FC8: 68           	pla			;get char again
+  1064 00:0FC9: 29 0F        NIBBL	and	#$0f		;mask off high nibble
+  1065 00:0FCB: C9 0A        	cmp	#$0A		;set or clear carry
+  1066 00:0FCD: F8           	sed			;sed for decimal add
+  1067 00:0FCE: 69 30        	adc	#$30		;make it ascii
+  1068 00:0FD0: D8           	cld			;back to binary add
+  1069 00:0FD1: 4C F4 09     	jmp	conout		;print it
+  1070                        ;
+  1071                        ;---->	POLKEY: Scan the keyboard for keys pressed
+  1072                        ;
+  1073                        ;
+  1074                        ;Returns with ZERO if no input.
+  1075                        ;
+  1076 00:0FD4: 20 03 08     POLKEY	jsr	const		;check console for input
+  1077 00:0FD7: 29 FF        	and	#$ff		;test result
+  1078 00:0FD9: F0 03        	beq	pol1		;no, ->
+  1079 00:0FDB: 20 EE 09     	jsr	coninp		;yes, read console
+  1080 00:0FDE: 60           POL1	rts			;from POLKEY
+  1081                        ;
+  1082                        ;---->	ABORT: Abort the file transfer
+  1083                        ;
+  1084 00:0FDF: 20 3B 0F     ABORT	jsr	onesec		;wait 1 sec without chars
+  1085 00:0FE2: 90 FB        	bcc	abort		;loop until sender done
+  1086 00:0FE4: A9 18        	lda 	#can		;send a cancel
+  1087 00:0FE6: 20 7F 0F     	jsr 	send1
+  1088 00:0FE9: 20 CF 10     	jsr	ilprt		;exit with abort message
+  1089 00:0FEC: 58 4D 4F 44  	byte	"XMODEM PROGRAM CANCELLED",cr,lf,0
+       00:0FF0: 45 4D 20 50 
+       00:0FF4: 52 4F 47 52 
+       00:0FF8: 41 4D 20 43 
+       00:0FFC: 41 4E 43 45 
+       00:1000: 4C 4C 45 44 
+       00:1004: 0D 0A 00 
+  1090 00:1007: 4C 31 10     	jmp	ckdis		;go to exit
+  1091                        ;
+  1092                        ;---->	DONE: Normal exit
+  1093                        ;
+  1094                        DONE
+  1095 00:100A: 20 CF 10     DONETC	jsr	ilprt		;print message
+  1096 00:100D: 54 52 41 4E  	byte	"TRANSFER COMPLETE",cr,lf,0
+       00:1011: 53 46 45 52 
+       00:1015: 20 43 4F 4D 
+       00:1019: 50 4C 45 54 
+       00:101D: 45 0D 0A 00 
+  1097 00:1021: AD 78 11     DONE1	lda	termfl		;check terminal flag
+  1098 00:1024: D0 03        	bne	done2		;no ->
+  1099 00:1026: 4C FE 08     	jmp	term
+  1100 00:1029: AD 75 11     DONE2	lda	echofl		;check echo flag
+  1101 00:102C: D0 03        	bne	ckdis		;no, ->
+  1102 00:102E: 4C 3B 09     	jmp	trmech		;go to terminal echo
+  1103                        ;
+  1104                        ;---->	CKDIS: Check for disconnect
+  1105                        ;
+  1106                        ERXIT
+  1107 00:1031: AD 74 11     CKDIS	lda	discfl		;check disconnect flag
+  1108 00:1034: D0 2B        	bne	discon		;no, ->
+  1109 00:1036: 20 CF 10     	jsr 	ilprt		;print message
+  Mon Mar 15 2021  1:14                                                                                                    Page 21
+
+
+  1110 00:1039: 0D 0A 50 52  	byte	cr,lf,"PRESS RETURN TO DISCONNECT:",0
+       00:103D: 45 53 53 20 
+       00:1041: 52 45 54 55 
+       00:1045: 52 4E 20 54 
+       00:1049: 4F 20 44 49 
+       00:104D: 53 43 4F 4E 
+       00:1051: 4E 45 43 54 
+       00:1055: 3A 00 
+  1111 00:1057: 20 EE 09     	jsr	coninp		;get a key
+  1112 00:105A: 20 64 10     	jsr	crlf		;print cr,lf
+  1113 00:105D: C9 0D        	cmp	#cr		;cr?
+  1114 00:105F: D0 D0        	bne	ckdis		;no, ->
+  1115                        ;disconnect - this version does nothing
+  1116 00:1061: 4C 00 01     DISCON	jmp	boot		;exit
+  1117                        ;
+  1118                        ;---->	CRLF:  send cr and lf to console
+  1119                        ;
+  1120                        ;preserves whatever was in a at entry
+  1121 00:1064: 48           CRLF	pha			;save a
+  1122 00:1065: A9 0D        	lda	#cr
+  1123 00:1067: 20 F4 09     	jsr	conout
+  1124 00:106A: A9 0A        	lda	#lf
+  1125 00:106C: 20 F4 09     	jsr	conout
+  1126 00:106F: 68           	pla			;restore a
+  1127 00:1070: 60           	rts
+  1128                        ;
+  1129                        ;---->  CKQUIT: Quit/Retry after multiple errors
+  1130                        ;
+  1131                        ;Returns w/zero set if retry asked for
+  1132                        ;
+  1133 00:1071: A9 00        CKQUIT	lda	#0		;zero out error count
+  1134 00:1073: 85 34        	sta	errcnt
+  1135 00:1075: 20 CF 10     CKQLP	jsr	ilprt		;print:
+  1136 00:1078: 4D 55 4C 54  	byte	"MULTIPLE ERRORS ENCOUNTERED",CR,LF
+       00:107C: 49 50 4C 45 
+       00:1080: 20 45 52 52 
+       00:1084: 4F 52 53 20 
+       00:1088: 45 4E 43 4F 
+       00:108C: 55 4E 54 45 
+       00:1090: 52 45 44 0D 
+       00:1094: 0A 
+  1137 00:1095: 54 59 50 45  	byte	"TYPE CTRL-E TO QUIT, R TO RETRY:",0
+       00:1099: 20 43 54 52 
+       00:109D: 4C 2D 45 20 
+       00:10A1: 54 4F 20 51 
+       00:10A5: 55 49 54 2C 
+       00:10A9: 20 52 20 54 
+       00:10AD: 4F 20 52 45 
+       00:10B1: 54 52 59 3A 
+       00:10B5: 00 
+  1138 00:10B6: 20 EE 09     	jsr	coninp		;get response
+  1139 00:10B9: 48           	pha			;save it
+  1140 00:10BA: 20 F4 09     	jsr	conout		;print it
+  1141 00:10BD: 20 64 10     	jsr 	crlf		;clean up line
+  1142 00:10C0: 68           	pla			;retrieve response
+  1143 00:10C1: 20 E3 09     	jsr	lwrupr		;convert to upper case
+  1144 00:10C4: C9 52        	cmp	#'R'		;retry?
+  1145 00:10C6: F0 06        	beq	ckq1		;yes, go on
+  1146 00:10C8: C9 05        	cmp	#CTRLE		;see if quit
+  1147 00:10CA: D0 A9        	bne	CKQLP		;loop if not
+  1148 00:10CC: A9 FF        	lda	#$FF		;set to non-zero
+  1149 00:10CE: 60           CKQ1	rts			;from CKQUIT
+  1150                        ;
+  Mon Mar 15 2021  1:14                                                                                                    Page 22
+
+
+  1151                        ;---->	ILPRT: In line print of message
+  1152                        ;
+  1153                        ;The call to ILPRT is followed by a message,
+  1154                        ;binary zero as the end. Binary one may be
+  1155                        ;used to pause with message 'PRESS RETURN TO CONTINUE'
+  1156                        ;
+  1157 00:10CF: 68           ILPRT	pla			;move the return
+  1158 00:10D0: 85 30        	sta	stroad		;address into
+  1159 00:10D2: 68           	pla			;zero page
+  1160 00:10D3: 85 31        	sta	stroad+1
+  1161 00:10D5: A0 01        n6	ldy	#1		;set y for addr+1
+  1162 00:10D7: B1 30        	lda	(stroad),y	;get the char
+  1163 00:10D9: F0 13        	beq	n3		;branch if done
+  1164 00:10DB: C9 01        	cmp	#1		;pause if #1
+  1165 00:10DD: D0 03        	bne	n5
+  1166 00:10DF: 4C FB 10     	jmp	lpause		;pause
+  1167 00:10E2: 20 F4 09     n5	jsr	conout		;print char
+  1168 00:10E5: E6 30        lpnext	inc	stroad		;bump the pointer
+  1169 00:10E7: D0 02        	bne	n4		;no carry >
+  1170 00:10E9: E6 31        	inc	stroad+1	;bump high byte
+  1171 00:10EB: 4C D5 10     n4	jmp	n6		;go back for more
+  1172 00:10EE: E6 30        n3	inc	stroad		;set return address
+  1173 00:10F0: D0 02        	bne	n7
+  1174 00:10F2: E6 31        	inc	stroad+1
+  1175 00:10F4: A5 31        n7	lda	stroad+1	;put addr back
+  1176 00:10F6: 48           	pha			;onto stack
+  1177 00:10F7: A5 30        	lda	stroad
+  1178 00:10F9: 48           	pha
+  1179 00:10FA: 60           	rts			;return past mess.
+  1180                        ;pause until return pressed
+  1181 00:10FB: A9 15        LPAUSE	lda	#<paumes	;set pointers
+  1182 00:10FD: A0 11        	ldy	#>paumes	;for pause message
+  1183 00:10FF: A2 09        	ldx	#print		;set pem command
+  1184 00:1101: 20 03 01     	jsr	pem		;print it
+  1185 00:1104: 20 EE 09     	jsr	coninp		;wait for a key
+  1186 00:1107: C9 05        	cmp	#ctrle		;see if quit
+  1187 00:1109: F0 07        	beq	n8		;is so quit
+  1188 00:110B: C9 0D        	cmp	#cr		;continue code?
+  1189 00:110D: D0 EC        	bne	lpause		;no ->
+  1190 00:110F: 4C E5 10     	jmp	lpnext		;is so print more
+  1191 00:1112: 4C 00 01     n8	jmp	boot		;EXIT
+  1192 00:1115: 0D 0A        PAUMES	byte	cr,lf
+  1193 00:1117: 50 52 45 53  	byte	"PRESS RETURN TO CONTINUE OR CTRL-E TO EXIT"
+       00:111B: 53 20 52 45 
+       00:111F: 54 55 52 4E 
+       00:1123: 20 54 4F 20 
+       00:1127: 43 4F 4E 54 
+       00:112B: 49 4E 55 45 
+       00:112F: 20 4F 52 20 
+       00:1133: 43 54 52 4C 
+       00:1137: 2D 45 20 54 
+       00:113B: 4F 20 45 58 
+       00:113F: 49 54 
+  1194 00:1141: 0D 0A 24     	byte	cr,lf,"$"
+  1195                        ;
+  1196                        ;---->  PROCOP: Process command options
+  1197                        ;
+  1198                        ;1) Save the primary option in 'OPTION';
+  1199                        ;2) Scans the sub-option characters, and for
+  1200                        ;each found, zeros the appropriate entry in
+  1201                        ;the option table. For example if 'D' is
+  1202                        ;coded (DISCONNECT) then the 'D' stored at
+  1203                        ;'DISCFL' is set to 0 so it can be tested
+  Mon Mar 15 2021  1:14                                                                                                    Page 23
+
+
+  1204                        ;later.
+  1205                        ;
+  1206 00:1144: A2 00        PROCOP	ldx	#0		;save the primary
+  1207 00:1146: BD 08 01     	lda	fcb+1,x		;option
+  1208 00:1149: 8D 71 11     	sta	option
+  1209 00:114C: E8           N10	inx			;point to the sec option
+  1210 00:114D: BD 08 01     	lda	fcb+1,x		;get it
+  1211 00:1150: C9 20        	cmp	#space		;if blank-> end of opts
+  1212 00:1152: F0 1C        	beq	endopt
+  1213 00:1154: 8E 72 11     	stx	optbl		;save sec option pointer
+  1214 00:1157: A2 01        	ldx	#1		;point to start op opts table
+  1215 00:1159: DD 72 11     N11	cmp	optbl,x		;look for a match
+  1216 00:115C: D0 0A        	bne	n9		;not this one ->
+  1217 00:115E: A9 00        	lda	#0		;found option
+  1218 00:1160: 9D 72 11     	sta	optbl,x		;put a zero in it
+  1219 00:1163: AE 72 11     	ldx	optbl		;recover fcb pointer
+  1220 00:1166: D0 E4        	bne 	n10		;always branch
+  1221 00:1168: E8           N9	inx			;bump opt tbl pointer
+  1222 00:1169: E0 07        	cpx	#optbe-optbl	;option table length
+  1223 00:116B: D0 EC        	bne	n11		;if more ->
+  1224 00:116D: 4C AA 11     	jmp	badopt		;bad option -> error mess
+  1225 00:1170: 60           ENDOPT	rts			;from procop
+  1226                        ;
+  1227                        ;Sub-option table. If an option is in effect,
+  1228                        ;the character is set to binary 0
+  1229                        ;
+  1230 00:1171: 00           OPTION	byte	0		;pri option saved here
+  1231 00:1172: 00           OPTBL	byte	0		;secondary option table
+  1232 00:1173: 41           ANSWFL	byte	"A"		;answer mode
+  1233 00:1174: 44           DISCFL	byte	"D"		;disconnect when done
+  1234 00:1175: 45           ECHOFL	byte	"E"		;to echo after xfer
+  1235 00:1176: 4F           ORIGFL	byte	"O"		;originate mode
+  1236 00:1177: 51           QFLG	byte	"Q"		;quiet transfer (no msgs)
+  1237 00:1178: 54           TERMFL	byte	"T"		;to term after xfer
+  1238                        OPTBE
+  1239 00:1179: 81 15        SECPTR	word	Dbuf		;Start of the block buffer
+  1240 00:117B: 00           SECNUM	byte	0		;sector number storage
+  1241                        ;move FCB
+  1242 00:117C: A9 17        MOVfcb	lda	#<fcb2		;set up 'from'
+  1243 00:117E: A0 01        	ldy	#>fcb2		;address
+  1244 00:1180: 85 3E        	sta	from
+  1245 00:1182: 84 3F        	sty	from+1
+  1246 00:1184: A9 07        	lda	#<fcb		;set up 'to'
+  1247 00:1186: A0 01        	ldy	#>fcb		;address
+  1248 00:1188: 85 40        	sta	to
+  1249 00:118A: 84 41        	sty	to+1
+  1250 00:118C: A2 10        	ldx	#16		;length to move
+  1251 00:118E: 20 9F 11     	jsr	move		;do the move
+  1252 00:1191: A9 00        	lda	#0		;get a zero
+  1253 00:1193: 8D 27 01     	sta	fcbsno		;set sector #
+  1254 00:1196: 8D 13 01     	sta	fcbext		;and the extent
+  1255 00:1199: 8D 14 01     	sta 	fcbext+1
+  1256 00:119C: 60           	rts
+  1257                        ;move 128 bytes from (from) to (to) using x as counter
+  1258 00:119D: A2 80        MOV128	ldx	#128		;set up to move 128
+  1259                        ;move x bytes from (from) to (to)
+  1260 00:119F: A0 00        MOVE	ldy	#0		;set index to zero
+  1261 00:11A1: B1 3E        movelp	lda	(from),y	;get byte
+  1262 00:11A3: 91 40        	sta	(to),y		;put byte
+  1263 00:11A5: C8           	iny			;bump index
+  1264 00:11A6: CA           	dex			;decrement the length
+  1265 00:11A7: D0 F8        	bne	movelp		;go back for more
+  1266 00:11A9: 60           	rts			;from move
+  Mon Mar 15 2021  1:14                                                                                                    Page 24
+
+
+  1267                        ;
+  1268                        ;Invalid command
+  1269                        ;
+  1270 00:11AA: 20 CF 10     BADOPT	jsr	ilprt		;exit w/error
+  1271 00:11AD: 3A 49 4E 56  	byte	":INVALID OPTION ON XMODEM "
+       00:11B1: 41 4C 49 44 
+       00:11B5: 20 4F 50 54 
+       00:11B9: 49 4F 4E 20 
+       00:11BD: 4F 4E 20 58 
+       00:11C1: 4D 4F 44 45 
+       00:11C5: 4D 20 
+  1272 00:11C7: 43 4F 4D 4D  	byte	"COMMAND -",cr,lf
+       00:11CB: 41 4E 44 20 
+       00:11CF: 2D 0D 0A 
+  1273 00:11D2: 50 52 45 53  	byte	"PRESS RETURN FOR HELP, OR "
+       00:11D6: 53 20 52 45 
+       00:11DA: 54 55 52 4E 
+       00:11DE: 20 46 4F 52 
+       00:11E2: 20 48 45 4C 
+       00:11E6: 50 2C 20 4F 
+       00:11EA: 52 20 
+  1274 00:11EC: 43 54 52 4C  	byte	"CTRL-E TO EXIT",cr,lf,0
+       00:11F0: 2D 45 20 54 
+       00:11F4: 4F 20 45 58 
+       00:11F8: 49 54 0D 0A 
+       00:11FC: 00 
+  1275 00:11FD: 20 EE 09     	jsr	coninp		;get key
+  1276 00:1200: C9 0D        	cmp	#cr		;see if RETURN
+  1277 00:1202: F0 07        	beq	HELP		;if so do HELP
+  1278 00:1204: C9 05        	cmp	#CTRLE		;see if ctrl-e
+  1279 00:1206: D0 A2        	bne	badopt		;loop if not
+  1280 00:1208: 4C 00 01     	jmp	boot		;but boot if is
+  1281                        ;e5xecute HELP option
+  1282 00:120B: 20 CF 10     HELP	jsr	ilprt
+  1283 00:120E: 0D 0A        	byte	cr,lf
+  1284 00:1210: 46 6F 72 6D  	byte	"Format for command is:",cr,lf
+       00:1214: 61 74 20 66 
+       00:1218: 6F 72 20 63 
+       00:121C: 6F 6D 6D 61 
+       00:1220: 6E 64 20 69 
+       00:1224: 73 3A 0D 0A 
+  1285 00:1228: 58 4D 4F 44  	byte	"XMODEM # FILENAME",cr,lf,cr,lf
+       00:122C: 45 4D 20 23 
+       00:1230: 20 46 49 4C 
+       00:1234: 45 4E 41 4D 
+       00:1238: 45 0D 0A 0D 
+       00:123C: 0A 
+  1286 00:123D: 57 68 65 72  	byte	"Where # is a 1 character "
+       00:1241: 65 20 23 20 
+       00:1245: 69 73 20 61 
+       00:1249: 20 31 20 63 
+       00:124D: 68 61 72 61 
+       00:1251: 63 74 65 72 
+       00:1255: 20 
+  1287 00:1256: 70 72 69 6D  	byte	"primary option,",cr,lf
+       00:125A: 61 72 79 20 
+       00:125E: 6F 70 74 69 
+       00:1262: 6F 6E 2C 0D 
+       00:1266: 0A 
+  1288 00:1267: 20 77 68 69  	byte	" which may be followed by "
+       00:126B: 63 68 20 6D 
+       00:126F: 61 79 20 62 
+       00:1273: 65 20 66 6F 
+  Mon Mar 15 2021  1:14                                                                                                    Page 25
+
+
+       00:1277: 6C 6C 6F 77 
+       00:127B: 65 64 20 62 
+       00:127F: 79 20 
+  1289 00:1281: 73 75 62 2D  	byte	"sub-options"
+       00:1285: 6F 70 74 69 
+       00:1289: 6F 6E 73 
+  1290 00:128C: 0D 0A 01     	byte	cr,lf,1
+  1291 00:128F: 50 72 69 6D  	byte	"Primary options",cr,lf
+       00:1293: 61 72 79 20 
+       00:1297: 6F 70 74 69 
+       00:129B: 6F 6E 73 0D 
+       00:129F: 0A 
+  1292 00:12A0: 20 20 20 53  	byte	"   S to send a file",cr,lf
+       00:12A4: 20 74 6F 20 
+       00:12A8: 73 65 6E 64 
+       00:12AC: 20 61 20 66 
+       00:12B0: 69 6C 65 0D 
+       00:12B4: 0A 
+  1293 00:12B5: 20 20 20 52  	byte	"   R to receive a file",cr,lf
+       00:12B9: 20 74 6F 20 
+       00:12BD: 72 65 63 65 
+       00:12C1: 69 76 65 20 
+       00:12C5: 61 20 66 69 
+       00:12C9: 6C 65 0D 0A 
+  1294 00:12CD: 20 20 20 54  	byte	"   T to act as a terminal",cr,lf
+       00:12D1: 20 74 6F 20 
+       00:12D5: 61 63 74 20 
+       00:12D9: 61 73 20 61 
+       00:12DD: 20 74 65 72 
+       00:12E1: 6D 69 6E 61 
+       00:12E5: 6C 0D 0A 
+  1295 00:12E8: 20 20 20 45  	byte	"   E to act as a computer "
+       00:12EC: 20 74 6F 20 
+       00:12F0: 61 63 74 20 
+       00:12F4: 61 73 20 61 
+       00:12F8: 20 63 6F 6D 
+       00:12FC: 70 75 74 65 
+       00:1300: 72 20 
+  1296 00:1302: 28 65 63 68  	byte	"(echo data)",cr,lf
+       00:1306: 6F 20 64 61 
+       00:130A: 74 61 29 0D 
+       00:130E: 0A 
+  1297 00:130F: 20 20 20 50  	byte	"   P to send input to printer",cr,lf
+       00:1313: 20 74 6F 20 
+       00:1317: 73 65 6E 64 
+       00:131B: 20 69 6E 70 
+       00:131F: 75 74 20 74 
+       00:1323: 6F 20 70 72 
+       00:1327: 69 6E 74 65 
+       00:132B: 72 0D 0A 
+  1298 00:132E: 20 20 20 44  	byte	"   D to disconnect the line",cr,lf
+       00:1332: 20 74 6F 20 
+       00:1336: 64 69 73 63 
+       00:133A: 6F 6E 6E 65 
+       00:133E: 63 74 20 74 
+       00:1342: 68 65 20 6C 
+       00:1346: 69 6E 65 0D 
+       00:134A: 0A 
+  1299 00:134B: 20 20 20 48  	byte	"   H to print this help file"
+       00:134F: 20 74 6F 20 
+       00:1353: 70 72 69 6E 
+       00:1357: 74 20 74 68 
+       00:135B: 69 73 20 68 
+  Mon Mar 15 2021  1:14                                                                                                    Page 26
+
+
+       00:135F: 65 6C 70 20 
+       00:1363: 66 69 6C 65 
+  1300 00:1367: 0D 0A 01     	byte	cr,lf,1
+  1301 00:136A: 53 65 63 6F  	byte	"Secondary options:",cr,lf
+       00:136E: 6E 64 61 72 
+       00:1372: 79 20 6F 70 
+       00:1376: 74 69 6F 6E 
+       00:137A: 73 3A 0D 0A 
+  1302 00:137E: 20 20 20 41  	byte	"   A answer mode",cr,lf
+       00:1382: 20 61 6E 73 
+       00:1386: 77 65 72 20 
+       00:138A: 6D 6F 64 65 
+       00:138E: 0D 0A 
+  1303 00:1390: 20 20 20 4F  	byte	"   O originate mode",cr,lf
+       00:1394: 20 6F 72 69 
+       00:1398: 67 69 6E 61 
+       00:139C: 74 65 20 6D 
+       00:13A0: 6F 64 65 0D 
+       00:13A4: 0A 
+  1304 00:13A5: 20 20 20 44  	byte	"   D disconnect after "
+       00:13A9: 20 64 69 73 
+       00:13AD: 63 6F 6E 6E 
+       00:13B1: 65 63 74 20 
+       00:13B5: 61 66 74 65 
+       00:13B9: 72 20 
+  1305 00:13BB: 65 78 65 63  	byte	"execution",cr,lf
+       00:13BF: 75 74 69 6F 
+       00:13C3: 6E 0D 0A 
+  1306 00:13C6: 20 20 20 54  	byte	"   T to go to terminal mode "
+       00:13CA: 20 74 6F 20 
+       00:13CE: 67 6F 20 74 
+       00:13D2: 6F 20 74 65 
+       00:13D6: 72 6D 69 6E 
+       00:13DA: 61 6C 20 6D 
+       00:13DE: 6F 64 65 20 
+  1307 00:13E2: 61 66 74 65  	byte	"after xfer",cr,lf
+       00:13E6: 72 20 78 66 
+       00:13EA: 65 72 0D 0A 
+  1308 00:13EE: 20 20 20 45  	byte	"   E to go to echo mode "
+       00:13F2: 20 74 6F 20 
+       00:13F6: 67 6F 20 74 
+       00:13FA: 6F 20 65 63 
+       00:13FE: 68 6F 20 6D 
+       00:1402: 6F 64 65 20 
+  1309 00:1406: 61 66 74 65  	byte	"after file xfer",cr,lf
+       00:140A: 72 20 66 69 
+       00:140E: 6C 65 20 78 
+       00:1412: 66 65 72 0D 
+       00:1416: 0A 
+  1310 00:1417: 20 20 20 51  	byte	"   Q quiet mode - no status "
+       00:141B: 20 71 75 69 
+       00:141F: 65 74 20 6D 
+       00:1423: 6F 64 65 20 
+       00:1427: 2D 20 6E 6F 
+       00:142B: 20 73 74 61 
+       00:142F: 74 75 73 20 
+  1311 00:1433: 6D 73 67 73  	byte	"msgs",cr,lf
+       00:1437: 0D 0A 
+  1312 00:1439: 0D 0A 46 4F  	byte	cr,lf,"FOR EXAMPLES, TYPE: XMODEM X"
+       00:143D: 52 20 45 58 
+       00:1441: 41 4D 50 4C 
+       00:1445: 45 53 2C 20 
+       00:1449: 54 59 50 45 
+  Mon Mar 15 2021  1:14                                                                                                    Page 27
+
+
+       00:144D: 3A 20 58 4D 
+       00:1451: 4F 44 45 4D 
+       00:1455: 20 58 
+  1313 00:1457: 0D 0A 00     	byte	cr,lf,0
+  1314 00:145A: 4C 5D 14     	jmp	exit
+  1315 00:145D: 4C 00 01     EXIT	jmp	boot
+  1316 00:1460: 20 CF 10     EXAM	jsr	ilprt
+  1317 00:1463: 53 65 6E 64  	byte	"Send a file, originate mode",cr,lf
+       00:1467: 20 61 20 66 
+       00:146B: 69 6C 65 2C 
+       00:146F: 20 6F 72 69 
+       00:1473: 67 69 6E 61 
+       00:1477: 74 65 20 6D 
+       00:147B: 6F 64 65 0D 
+       00:147F: 0A 
+  1318 00:1480: 20 20 20 58  	byte	"   XMODEM SO fn.ft",cr,lf
+       00:1484: 4D 4F 44 45 
+       00:1488: 4D 20 53 4F 
+       00:148C: 20 66 6E 2E 
+       00:1490: 66 74 0D 0A 
+  1319 00:1494: 53 65 6E 64  	byte	"Send another file:",cr,lf
+       00:1498: 20 61 6E 6F 
+       00:149C: 74 68 65 72 
+       00:14A0: 20 66 69 6C 
+       00:14A4: 65 3A 0D 0A 
+  1320 00:14A8: 20 20 20 58  	byte	"   XMODEM S fn.ft",cr,lf
+       00:14AC: 4D 4F 44 45 
+       00:14B0: 4D 20 53 20 
+       00:14B4: 66 6E 2E 66 
+       00:14B8: 74 0D 0A 
+  1321 00:14BB: 53 65 6E 64  	byte	"Send a third file and "
+       00:14BF: 20 61 20 74 
+       00:14C3: 68 69 72 64 
+       00:14C7: 20 66 69 6C 
+       00:14CB: 65 20 61 6E 
+       00:14CF: 64 20 
+  1322 00:14D1: 64 69 73 63  	byte	"disconnect:",cr,lf
+       00:14D5: 6F 6E 6E 65 
+       00:14D9: 63 74 3A 0D 
+       00:14DD: 0A 
+  1323 00:14DE: 20 20 20 58  	byte	"   XMODEM SD fn.ft",cr,lf
+       00:14E2: 4D 4F 44 45 
+       00:14E6: 4D 20 53 44 
+       00:14EA: 20 66 6E 2E 
+       00:14EE: 66 74 0D 0A 
+  1324 00:14F2: 41 63 74 20  	byte	"Act as a terminal, originate"
+       00:14F6: 61 73 20 61 
+       00:14FA: 20 74 65 72 
+       00:14FE: 6D 69 6E 61 
+       00:1502: 6C 2C 20 6F 
+       00:1506: 72 69 67 69 
+       00:150A: 6E 61 74 65 
+  1325 00:150E: 6D 6F 64 65  	byte	"mode:",cr,lf
+       00:1512: 3A 0D 0A 
+  1326 00:1515: 20 20 20 58  	byte	"   XMODEM TO",cr,lf
+       00:1519: 4D 4F 44 45 
+       00:151D: 4D 20 54 4F 
+       00:1521: 0D 0A 
+  1327 00:1523: 20 20 20 28  	byte	"   (Use ctrl-E to disconnect)",cr,lf
+       00:1527: 55 73 65 20 
+       00:152B: 63 74 72 6C 
+       00:152F: 2D 45 20 74 
+       00:1533: 6F 20 64 69 
+  Mon Mar 15 2021  1:14                                                                                                    Page 28
+
+
+       00:1537: 73 63 6F 6E 
+       00:153B: 6E 65 63 74 
+       00:153F: 29 0D 0A 
+  1328 00:1542: 52 65 63 65  	byte	"Receive a file, answer mode"
+       00:1546: 69 76 65 20 
+       00:154A: 61 20 66 69 
+       00:154E: 6C 65 2C 20 
+       00:1552: 61 6E 73 77 
+       00:1556: 65 72 20 6D 
+       00:155A: 6F 64 65 
+  1329 00:155D: 2C 20 76 69  	byte	", view it:",cr,lf
+       00:1561: 65 77 20 69 
+       00:1565: 74 3A 0D 0A 
+  1330 00:1569: 20 20 20 58  	byte	"   XMODEM RA fn.ft",cr,lf,0
+       00:156D: 4D 4F 44 45 
+       00:1571: 4D 20 52 41 
+       00:1575: 20 66 6E 2E 
+       00:1579: 66 74 0D 0A 
+       00:157D: 00 
+  1331 00:157E: 4C 5D 14     	jmp	exit
+  1332                        ;block storage buffer
+  1333 00:1581:              dbuf	ds	16*128		;16 records
+  1334                        	ends
+  1335                        	end
+
+
+      Lines assembled: 1335
+      Errors: 0
